@@ -5,9 +5,9 @@ This project is still very much a WIP, but the basic components should be usable
 
 ### Quickstart
 1. download the latest version from [github releases](https://github.com/wandel/pdbgen/releases)
-1. copy ```ghidra/pdbgen.java``` into your ghidra_scripts folder (```%USERPROFILE%/ghidra_scripts```).
+1. copy ```assets/PdbGen.java``` into your ghidra_scripts folder (```%USERPROFILE%/ghidra_scripts```).
 1. Run the pdbgen script via Ghidra's Script Manager.
-1. Run ```build/Release/pdbgen.exe <path/name.exe>```
+1. Run ```assets/pdbgen.exe <path/name.exe>```
 1. The new pdb will be found at ```path/name.pdb```
 1. Load your binary in windbg and it should automatically find the new pdb.
     1. Note: ensure windbg is not using a cached copy (`c:\ProgramData\Dbg\Sym\<name.exe>`).
