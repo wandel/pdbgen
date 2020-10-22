@@ -15,7 +15,10 @@ import java.util.UUID;
 
 import org.apache.logging.log4j.util.Strings;
 
+import ghidra.app.plugin.core.navigation.FunctionUtils;
 import ghidra.app.script.GhidraScript;
+import ghidra.program.database.data.DataTypeUtilities;
+import ghidra.program.database.function.FunctionDB;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.*;
 import ghidra.program.model.data.Enum;
@@ -23,8 +26,10 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.FunctionSignature;
 import ghidra.program.model.listing.Parameter;
+import ghidra.program.model.listing.VariableUtilities;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolType;
+import ghidra.program.util.FunctionUtility;
 import ghidra.util.UniversalID;
 
 public class PdbGen extends GhidraScript {
@@ -33,6 +38,8 @@ public class PdbGen extends GhidraScript {
 	Map<String, String> typedefs = new HashMap<String, String>();
 	List<String> serialized = new ArrayList<String>();
 	Map<String, String> forwardDeclared = new HashMap<String, String>();
+	
+	Map<Address, FunctionDefinition> entrypoints = new HashMap<Address, FunctionDefinition>();
 	
 	private boolean isSerialized(DataType dt) {
 		String id = GetId(dt);
@@ -154,7 +161,7 @@ public class PdbGen extends GhidraScript {
 				fields.add(String.format(fmt, dt.getFieldName(), GetId(dt.getDataType()), dt.getOffset()));
 			}
 		}
-
+		
 		String fmt = "{\"type\":\"LF_STRUCTURE\", \"id\": \"%s\", \"name\":\"%s\", \"unique_name\":\"%s\", \"size\": %d, \"options\":[], \"fields\": [%s]}";
 		return String.format(fmt, GetFwdId(x), x.getName(), GetFwdId(x), x.getLength(), Strings.join(fields, ','));
 	}
@@ -174,15 +181,24 @@ public class PdbGen extends GhidraScript {
 		String fmt = "{\"type\": \"LF_BITFIELD\", \"id\": \"%s\", \"type_id\": \"%s\", \"bit_offset\": %d, \"bit_size\": %d}";
 		return String.format(fmt, GetId(x), GetId(x.getBaseDataType()), x.getBitOffset(), x.getBitSize());
 	}
-	
+
 	private List<String> dump(FunctionDefinition x) {
+//		// There should be a good way of determining class, but I haven't found it yet
+//		// So instead I'm just gonna check calling convention and lookup the type manually.
+//		if (x.getGenericCallingConvention() == GenericCallingConvention.thiscall) {
+//			DataType clz = x.getArguments()[0].getDataType();
+//			if (clz instanceof Pointer) {
+//				clz = ((Pointer) clz).getDataType();
+//			}
+//			printf("%s::%s()\n", clz.getName(), x.getName());
+//		}
+//		printf("function [%s] %s %s", x.getName(), GetId(x), x.getClass().getName());
 		if (!isSerialized(x.getReturnType())) return null;
 		List<String> parameters = new ArrayList<String>();
 		for (ParameterDefinition p : x.getArguments()) {
 			if (!isSerialized(p.getDataType())) return null;
 			parameters.add('"'+GetId(p.getDataType())+'"');
 		}
-
 		List<String> entries = new ArrayList<String>();
 		// we need to emit a LF_PROCEDURE before the LF_FUNC_ID because PDB requires strict ordering.
 		String fmt = "{\"type\":\"LF_PROCEDURE\", \"id\": \"%s\", \"name\": \"%s\", \"return_type\": \"%s\", \"calling_convention\": \"%s\", \"options\": [], \"parameters\": [%s]}";
@@ -193,6 +209,7 @@ public class PdbGen extends GhidraScript {
 		fmt = "{\"type\": \"LF_FUNC_ID\", \"id\": \"%s\", \"name\": \"%s\", \"function_type\": \"%s\", \"parent_scope\":\"%s\"}";
 		entries.add(String.format(fmt, tmpId, x.getName(), GetId(x), "0x0000"));
 
+//		entrypoints.put()
 		return entries;
 	}
 
@@ -386,6 +403,7 @@ public class PdbGen extends GhidraScript {
 			FunctionSignature signature = function.getSignature();
 			if (signature instanceof FunctionDefinition) {
 				datatypes.add((FunctionDefinition) signature);
+				entrypoints.put(function.getEntryPoint(), (FunctionDefinition) signature);
 			}
 			for (Parameter param : function.getParameters()) {
 				if (!datatypes.contains(param.getDataType())) {
@@ -432,32 +450,44 @@ public class PdbGen extends GhidraScript {
 //			} else if (source == SourceType.USER_DEFINED) {
 //			}
 
+			String name = symbol.getName(true);
 			if (stype == SymbolType.CLASS) {
 			} else if (stype == SymbolType.FUNCTION) {
 				Function function = manager.getFunctionAt(address);
-				if (function.isThunk()) continue;
+				if (function.isThunk() && !name.startsWith("thunk_")) name = "thunk_"+name;
 				String fmt = "{\"type\": \"S_PUB32\", \"name\": \"%s\", \"address\": %d, \"function\": true}";
-				lines.add(String.format(fmt, symbol.getName(true), address.getUnsignedOffset()));
+				lines.add(String.format(fmt, name, address.getUnsignedOffset()));
+				if (function.isThunk()) continue;
 
-				FunctionSignature signature = function.getSignature();
-				String id = GetId((FunctionDefinition) signature);
+				// for what ever reason, the ID of the FunctionSignature is different from when we dumps the types,
+				// so we cache the original type, and use the function's address to find it now.
+				FunctionDefinition definition = entrypoints.get(address);
+
+				String id = GetId(definition);
+//				printf("signature [%s] %s %s", definition.getName(), id, definition.getClass().getName());
+
+
 //				// I dont have a good way of looking up the FunctionDefinition id from here. will probably need a refactor.
 				Address start = function.getBody().getMinAddress();
 				Address end = function.getBody().getMaxAddress();
+
 				// S_GPROC32
-				fmt = "{\"type\": \"S_GPROC32\", \"name\": \"%s\", \"address\": \"%s\", \"code_size\": \"%d\", \"function_type\": \"%s\", \"debug_start\": %d, \"debug_end\": %d, \"parent\": \"%s\", \"flags\": []}";
-				lines.add(String.format(fmt,  symbol.getName(), start.getUnsignedOffset(), end.subtract(start)+1, id, 0, 0, "0x0000"));
-//				
+				fmt = "{\"type\": \"S_GPROC32\", \"name\": \"%s\", \"address\": %d, \"code_size\": %d, \"end\": %d, \"function_type\": \"%s\", \"debug_start\": %d, \"debug_end\": %d, \"parent\": \"%s\", \"flags\": []}";
+				lines.add(String.format(fmt,  name, start.getUnsignedOffset(), end.subtract(start)+1, 0, id, 0, 0, "0x0000"));
+				lines.add("{\"type\": \"S_END\"}");
+
 //				// S_PROCREF
-				fmt = "{\"type\": \"S_PROCREF\", \"name\": \"%s\", \"address\": \"%s\", \"code_size\": \"%d\", \"function_type\": \"%s\", \"debug_start\": %d, \"debug_end\": %d, \"parent\": \"%s\", \"flags\": []}";
-				lines.add(String.format(fmt,  symbol.getName(), start.getUnsignedOffset(), end.subtract(start)+1, id, 0, 0, "0x0000"));
+//				fmt = "{\"type\": \"S_PROCREF\", \"name\": \"%s\", \"address\": %d, \"code_size\": \"%d\", \"function_type\": \"%s\", \"debug_start\": %d, \"debug_end\": %d, \"parent\": \"%s\", \"flags\": []}";
+//				lines.add(String.format(fmt,  name, start.getUnsignedOffset(), end.subtract(start)+1, id, 0, 0, "0x0000"));
 			} else if (stype == SymbolType.GLOBAL) {
 				String fmt = "{\"type\": \"S_PUB32\", \"name\": \"%s\", \"address\": %d, \"function\": false}";
-				lines.add(String.format(fmt, symbol.getName(), address.getUnsignedOffset()));
+				lines.add(String.format(fmt, name, address.getUnsignedOffset()));
 			} else if (stype == SymbolType.GLOBAL_VAR) {
 				String fmt = "{\"type\": \"S_PUB32\", \"name\": \"%s\", \"address\": %d, \"function\": false}";
-				lines.add(String.format(fmt, symbol.getName(), address.getUnsignedOffset()));
+				lines.add(String.format(fmt, name, address.getUnsignedOffset()));
 			} else if (stype == SymbolType.LABEL) {
+			} else if (stype == SymbolType.CLASS) {
+				printf("class:"+symbol.getName());
 			} else if (stype == SymbolType.LIBRARY) {
 			} else if (stype == SymbolType.LOCAL_VAR) {
 			} else if (stype == SymbolType.NAMESPACE) {
@@ -559,7 +589,7 @@ public class PdbGen extends GhidraScript {
 
 		// Now serialize all the data types (in dependency order)
 		List<String> datatypes = toJson(getAllDataTypes());
-		List<String> symbols = toJsonSymbols(getAllSymbols());		
+		List<String> symbols = toJsonSymbols(getAllSymbols());
 		String fmt = "{\"types\": [%s], \"symbols\": [%s]}";
 		String json = String.format(fmt, Strings.join(datatypes, ','), Strings.join(symbols, ','));
 
