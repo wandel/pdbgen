@@ -3,30 +3,30 @@
 #include <fstream>
 #include <iostream>
 
-#include <llvm/ADT/ArrayRef.h>
-#include <llvm/ADT/SmallVector.h>
-#include <llvm/Object/Binary.h>
-#include <llvm/Object/COFF.h>
-#include <llvm/Support/Endian.h>
-#include <llvm/Support/Error.h>
-#include <llvm/Support/ErrorOr.h>
-#include <llvm/Support/ErrorHandling.h>
-#include <llvm/Support/Parallel.h>
-#include <llvm/Support/MemoryBuffer.h>
 #include "llvm/DebugInfo/CodeView/ContinuationRecordBuilder.h"
 #include "llvm/DebugInfo/CodeView/SimpleTypeSerializer.h"
+#include "llvm/DebugInfo/PDB/Native/DbiModuleDescriptorBuilder.h"
+#include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/DebugInfo/CodeView/AppendingTypeTableBuilder.h>
 #include <llvm/DebugInfo/CodeView/StringsAndChecksums.h>
+#include <llvm/DebugInfo/CodeView/SymbolRecordHelpers.h>
+#include <llvm/DebugInfo/CodeView/SymbolSerializer.h>
+#include <llvm/DebugInfo/MSF/MSFBuilder.h>
 #include <llvm/DebugInfo/PDB/Native/DbiStreamBuilder.h>
 #include <llvm/DebugInfo/PDB/Native/GSIStreamBuilder.h>
 #include <llvm/DebugInfo/PDB/Native/InfoStreamBuilder.h>
 #include <llvm/DebugInfo/PDB/Native/PDBFileBuilder.h>
-#include "llvm/DebugInfo/PDB/Native/DbiModuleDescriptorBuilder.h"
 #include <llvm/DebugInfo/PDB/Native/TpiHashing.h>
 #include <llvm/DebugInfo/PDB/Native/TpiStreamBuilder.h>
-#include <llvm/DebugInfo/CodeView/SymbolSerializer.h>
-#include <llvm/DebugInfo/CodeView/SymbolRecordHelpers.h>
-#include <llvm/DebugInfo/MSF/MSFBuilder.h>
+#include <llvm/Object/Binary.h>
+#include <llvm/Object/COFF.h>
+#include <llvm/Support/Endian.h>
+#include <llvm/Support/Error.h>
+#include <llvm/Support/ErrorHandling.h>
+#include <llvm/Support/ErrorOr.h>
+#include <llvm/Support/MemoryBuffer.h>
+#include <llvm/Support/Parallel.h>
 
 #include "lyra.hpp"
 #include "nlohmann.hpp"
@@ -695,8 +695,8 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
     llvm::StringRef modName = "fake.obj";
     llvm::pdb::DbiModuleDescriptorBuilder &moduleDBI = ExitOnError(dbi.addModuleInfo(modName));
     moduleDBI.setObjFileName(modName);
-    
-      //SC[.text] |mod = 0, 0001 : 1136, size = 374, data crc = 2800844987, reloc crc = 0
+
+    // SC[.text] |mod = 0, 0001 : 1136, size = 374, data crc = 2800844987, reloc crc = 0
     llvm::pdb::SectionContrib SC = {};
     SC.Size = 374;
     SC.ISect = 1;
@@ -704,20 +704,19 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
     SC.DataCrc = 2800844987;
     // IMAGE_SCN_CNT_CODE | IMAGE_SCN_ALIGN_16BYTES | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ
     SC.Characteristics = 0x00000020 | 0x00500000 | 0x20000000 | 0x40000000;
-    
-    
+
     moduleDBI.setFirstSectionContrib(SC);
 
     llvm::codeview::ObjNameSym objname(llvm::codeview::SymbolKind::S_OBJNAME);
     objname.Name = modName;
     moduleDBI.addSymbol(WriteOneSymbol(objname));
 
-          //64 | S_COMPILE3[size = 60]
-          // machine = intel x86 - x64,
-          // Ver = Microsoft(R) Optimizing Compiler,
-          // language = c++ frontend = 19.27.29112.0,
-          // backend = 19.27.29112.0
-          // flags = security checks | hot patchable
+    // 64 | S_COMPILE3[size = 60]
+    // machine = intel x86 - x64,
+    // Ver = Microsoft(R) Optimizing Compiler,
+    // language = c++ frontend = 19.27.29112.0,
+    // backend = 19.27.29112.0
+    // flags = security checks | hot patchable
     llvm::codeview::Compile3Sym compile(llvm::codeview::SymbolKind::S_COMPILE3);
 
     // just copying VS2019 for alot of these values
@@ -741,7 +740,6 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
     compile.VersionBackendQFE = 0;
 
     moduleDBI.addSymbol(WriteOneSymbol(compile));
-
 
     // alot of this code is from lld\COFF\PDB.cpp
     llvm::codeview::CVSymbol newSym;
@@ -791,53 +789,55 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
         }
     }
 
+    // Mod 0044 | `*Linker *`: 4 | S_OBJNAME[size = 20] sig = 0, `* Linker *` 24 | S_COMPILE3[size = 48] machine = intel
+    // x86 - x64, Ver = Microsoft(R) LINK, language = link frontend = 0.0.0.0, backend = 14.27.29112.0 flags = none
 
-    //Mod 0044 | `*Linker *`: 4 | S_OBJNAME[size = 20] sig = 0, `* Linker *` 24 | S_COMPILE3[size = 48] machine = intel x86 - x64,
-    //Ver = Microsoft(R) LINK, language = link frontend = 0.0.0.0,
-    //backend = 14.27.29112.0 flags = none
+    // llvm::pdb::DbiModuleDescriptorBuilder &linkerDBI = ExitOnError(dbi.addModuleInfo("* Linker *"));
+    // linkerDBI.setObjFileName("* Linker *");
 
-    llvm::pdb::DbiModuleDescriptorBuilder &linkerDBI = ExitOnError(dbi.addModuleInfo("* Linker *"));
-    linkerDBI.setObjFileName("* Linker *");
+    // llvm::codeview::ObjNameSym linkname(llvm::codeview::SymbolKind::S_OBJNAME);
+    // linkname.Name = "* Linker *";
+    // linkerDBI.addSymbol(WriteOneSymbol(linkname));
 
-    llvm::codeview::ObjNameSym linkname(llvm::codeview::SymbolKind::S_OBJNAME);
-    linkname.Name = "* Linker *";
-    linkerDBI.addSymbol(WriteOneSymbol(linkname));
+    // llvm::codeview::Compile3Sym linker(llvm::codeview::SymbolKind::S_COMPILE3);
 
-    llvm::codeview::Compile3Sym linker(llvm::codeview::SymbolKind::S_COMPILE3);
+    // // just copying VS2019 for alot of these values
+    // if (coff->is64()) {
+    //     linker.Machine = llvm::codeview::CPUType::X64;
+    // } else {
+    //     linker.Machine = llvm::codeview::CPUType::Pentium3;
+    // }
+    // linker.Version = "Microsoft(R) LINK";
+    // linker.setLanguage(llvm::codeview::SourceLanguage::Link);
 
-    // just copying VS2019 for alot of these values
-    if (coff->is64()) {
-        linker.Machine = llvm::codeview::CPUType::X64;
-    } else {
-        linker.Machine = llvm::codeview::CPUType::Pentium3;
-    }
-    linker.Version = "Microsoft(R) LINK";
-    linker.setLanguage(llvm::codeview::SourceLanguage::Link);
+    // // frontend = 19.27.29112.0, backend = 19.27.29112.0
+    // linker.VersionFrontendMajor = 0;
+    // linker.VersionFrontendMinor = 0;
+    // linker.VersionFrontendBuild = 0;
+    // linker.VersionFrontendQFE = 0;
 
-    // frontend = 19.27.29112.0, backend = 19.27.29112.0
-    linker.VersionFrontendMajor = 0;
-    linker.VersionFrontendMinor = 0;
-    linker.VersionFrontendBuild = 0;
-    linker.VersionFrontendQFE = 0;
+    // linker.VersionBackendMajor = 14;
+    // linker.VersionBackendMinor = 10;
+    // linker.VersionBackendBuild = 25019;
+    // linker.VersionBackendQFE = 0;
 
-    linker.VersionBackendMajor = 14;
-    linker.VersionBackendMinor = 10;
-    linker.VersionBackendBuild = 25019;
-    linker.VersionBackendQFE = 0;
+    // linkerDBI.addSymbol(WriteOneSymbol(linker));
 
-    linkerDBI.addSymbol(WriteOneSymbol(linker));
+    // llvm::codeview::EnvBlockSym ebs(llvm::codeview::SymbolRecordKind::EnvBlockSym);
+    // ebs.Fields.push_back("cwd");
+    // ebs.Fields.push_back("C:\\Workspace\\example\\build64");
+    // ebs.Fields.push_back("exe");
+    // ebs.Fields.push_back("C:\\Program Files(x86)\\Microsoft Visual
+    // Studio\\2019\\Enterprise\\VC\\Tools\\MSVC\\14.27.29110\\bin\\HostX64\\x64\\link.exe");
+    // ebs.Fields.push_back("pdb");
+    // ebs.Fields.push_back("C:\\Workspace\\example\\build64\\Debug\\app.pdb");
+    // ebs.Fields.push_back("cmd");
+    // ebs.Fields.push_back("/ERRORREPORT:QUEUE /OUT:C:\\Workspace\\example\\build64\\Debug\\app.exe /INCREMENTAL
+    // /NOLOGO /MANIFEST \"/MANIFESTUAC:level='asInvoker' uiAccess='false'\" /manifest:embed /DEBUG
+    // /PDB:C:/Workspace/example/build64/Debug/app.pdb /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT
+    // /IMPLIB:C:/Workspace/example/build64/Debug/app.lib /MACHINE : X64 /machine : x64");
 
-    llvm::codeview::EnvBlockSym ebs(llvm::codeview::SymbolRecordKind::EnvBlockSym);
-    ebs.Fields.push_back("cwd");
-    ebs.Fields.push_back("C:\\Workspace\\example\\build64");
-    ebs.Fields.push_back("exe");
-    ebs.Fields.push_back("C:\\Program Files(x86)\\Microsoft Visual Studio\\2019\\Enterprise\\VC\\Tools\\MSVC\\14.27.29110\\bin\\HostX64\\x64\\link.exe");
-    ebs.Fields.push_back("pdb");
-    ebs.Fields.push_back("C:\\Workspace\\example\\build64\\Debug\\app.pdb");
-    ebs.Fields.push_back("cmd");
-    ebs.Fields.push_back("/ERRORREPORT:QUEUE /OUT:C:\\Workspace\\example\\build64\\Debug\\app.exe /INCREMENTAL /NOLOGO /MANIFEST \"/MANIFESTUAC:level='asInvoker' uiAccess='false'\" /manifest:embed /DEBUG /PDB:C:/Workspace/example/build64/Debug/app.pdb /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:C:/Workspace/example/build64/Debug/app.lib /MACHINE : X64 /machine : x64");
-
-    linkerDBI.addSymbol(WriteOneSymbol(ebs));
+    // linkerDBI.addSymbol(WriteOneSymbol(ebs));
 
     std::cout << "publics: " << publics.size() << std::endl;
     if (publics.size() > 0) {
