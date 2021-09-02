@@ -5,6 +5,11 @@
 //@menupath Tools.Generate PDB
 //@toolbar 
 
+import java.io.BufferedReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -13,12 +18,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import org.apache.logging.log4j.util.Strings;
+import org.apache.commons.io.FilenameUtils;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.google.gson.stream.JsonWriter;
 
+import generic.util.Path;
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.*;
@@ -186,7 +191,7 @@ public class PdbGen extends GhidraScript {
 			if (!isSerialized(dt.getDataType())) return null;
 			
 			JsonObject json = new JsonObject();
-			json.addProperty("type", "LF_MEMEBER");
+			json.addProperty("type", "LF_MEMBER");
 			json.addProperty("name", dt.getFieldName());
 			json.addProperty("type_id", GetId(dt.getDataType()));
 			json.addProperty("offset", dt.getOffset());
@@ -675,6 +680,15 @@ public class PdbGen extends GhidraScript {
 		}
 	}
 	
+	public static List<String> readAll(InputStream in) throws IOException {
+		BufferedReader reader = new BufferedReader(new InputStreamReader(in));
+		List<String> lines = new ArrayList<String>();
+		while (reader.ready()) {
+			lines.add(reader.readLine());
+		}
+		return lines;
+	}
+	
 	public void run() throws Exception {
 		// setup typedefs so we can map to basic types
 		initializeTypeDefs();
@@ -685,18 +699,42 @@ public class PdbGen extends GhidraScript {
 		json.add("types", toJson(getAllDataTypes()));
 		json.add("symbols", toJsonSymbols(getAllSymbols()));
 
-		// simple configurable path
-		// Ghidra will cache the default value here, and it will prefer its internal cached version over our default path :(.
-		String path = currentProgram.getExecutablePath() + ".json";
-		
-		path = askString("location to save", "select a location to save the output json", path);
-		PrintWriter w = new PrintWriter(path);
-		w.write(json.toString());
-		w.close();
-
 		typedefs.clear();
 		serialized.clear();
 		forwardDeclared.clear();
+
+		// Ghidra has unhelpfully set the path to \C:\\Something\ this gives as a normal c:\\Something
+		String exepath = Path.fromPathString(currentProgram.getExecutablePath()).toString();
+		printf("executable: %s\n", exepath);
+		String output = FilenameUtils.removeExtension(exepath).concat(".pdb");
+		String jsonpath = FilenameUtils.removeExtension(exepath).concat(".json");
+		
+		output = "c:\\temp\\vmrest.pdb";
+		jsonpath = "c:\\temp\\vmrest.json";
+		
+		FileWriter w = new FileWriter(jsonpath);
+		w.write(json.toString());
+		w.close();
+		
+		// simple configurable path
+		// Ghidra will cache the default value here, and it will prefer its internal cached version over our default path :(.
+//		output = askString("location to save", "select a location to save the output pdb", output);
+//		
+		ProcessBuilder pdbgen = new ProcessBuilder();
+		pdbgen.command("pdbgen.exe", exepath, "-", "--output", output);
+		
+		Process proc = pdbgen.start();
+		PrintWriter stdin = new PrintWriter(proc.getOutputStream());
+		stdin.write(json.toString());
+		stdin.close();
+		proc.waitFor();
+		for (String line : readAll(proc.getInputStream())) {
+			println(line);
+		}
+		
+		for (String line : readAll(proc.getErrorStream())) {
+			printerr(line);
+		}
 		
 		return;
 	}
