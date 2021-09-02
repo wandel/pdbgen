@@ -3,30 +3,30 @@
 #include <fstream>
 #include <iostream>
 
-#include <llvm/ADT/ArrayRef.h>
-#include <llvm/ADT/SmallVector.h>
-#include <llvm/Object/Binary.h>
-#include <llvm/Object/COFF.h>
-#include <llvm/Support/Endian.h>
-#include <llvm/Support/Error.h>
-#include <llvm/Support/ErrorOr.h>
-#include <llvm/Support/ErrorHandling.h>
-#include <llvm/Support/Parallel.h>
-#include <llvm/Support/MemoryBuffer.h>
 #include "llvm/DebugInfo/CodeView/ContinuationRecordBuilder.h"
 #include "llvm/DebugInfo/CodeView/SimpleTypeSerializer.h"
+#include "llvm/DebugInfo/PDB/Native/DbiModuleDescriptorBuilder.h"
+#include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/DebugInfo/CodeView/AppendingTypeTableBuilder.h>
 #include <llvm/DebugInfo/CodeView/StringsAndChecksums.h>
+#include <llvm/DebugInfo/CodeView/SymbolRecordHelpers.h>
+#include <llvm/DebugInfo/CodeView/SymbolSerializer.h>
+#include <llvm/DebugInfo/MSF/MSFBuilder.h>
 #include <llvm/DebugInfo/PDB/Native/DbiStreamBuilder.h>
 #include <llvm/DebugInfo/PDB/Native/GSIStreamBuilder.h>
 #include <llvm/DebugInfo/PDB/Native/InfoStreamBuilder.h>
 #include <llvm/DebugInfo/PDB/Native/PDBFileBuilder.h>
-#include "llvm/DebugInfo/PDB/Native/DbiModuleDescriptorBuilder.h"
 #include <llvm/DebugInfo/PDB/Native/TpiHashing.h>
 #include <llvm/DebugInfo/PDB/Native/TpiStreamBuilder.h>
-#include <llvm/DebugInfo/CodeView/SymbolSerializer.h>
-#include <llvm/DebugInfo/CodeView/SymbolRecordHelpers.h>
-#include <llvm/DebugInfo/MSF/MSFBuilder.h>
+#include <llvm/Object/Binary.h>
+#include <llvm/Object/COFF.h>
+#include <llvm/Support/Endian.h>
+#include <llvm/Support/Error.h>
+#include <llvm/Support/ErrorHandling.h>
+#include <llvm/Support/ErrorOr.h>
+#include <llvm/Support/MemoryBuffer.h>
+#include <llvm/Support/Parallel.h>
 
 #include "lyra.hpp"
 #include "nlohmann.hpp"
@@ -565,11 +565,15 @@ static void scopeStackClose(llvm::SmallVectorImpl<SymbolScope> &stack, uint32_t 
 
 // main logic here
 int process(std::filesystem::path exe_path, std::filesystem::path json_path, std::filesystem::path pdb_path) {
-    std::ifstream json_file(json_path);
-    assert(json_file.is_open());
-
     nlohmann::json json;
-    json_file >> json;
+
+    if (json_path.empty()) {
+        std::cin >> json;
+    } else {
+        std::ifstream json_file(json_path);
+        assert(json_file.is_open());
+        json_file >> json;
+    }
 
     llvm::pdb::PDBFileBuilder builder(allocator);
 
@@ -695,7 +699,7 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
     llvm::StringRef modName = "fake.obj";
     llvm::pdb::DbiModuleDescriptorBuilder &moduleDBI = ExitOnError(dbi.addModuleInfo(modName));
     moduleDBI.setObjFileName(modName);
-    
+
       //SC[.text] |mod = 0, 0001 : 1136, size = 374, data crc = 2800844987, reloc crc = 0
     llvm::pdb::SectionContrib SC = {};
     SC.Size = 374;
@@ -704,8 +708,8 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
     SC.DataCrc = 2800844987;
     // IMAGE_SCN_CNT_CODE | IMAGE_SCN_ALIGN_16BYTES | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ
     SC.Characteristics = 0x00000020 | 0x00500000 | 0x20000000 | 0x40000000;
-    
-    
+
+
     moduleDBI.setFirstSectionContrib(SC);
 
     llvm::codeview::ObjNameSym objname(llvm::codeview::SymbolKind::S_OBJNAME);
@@ -867,15 +871,15 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
 
 int main(int argc, char **argv) {
     bool show_help = false;
-    std::filesystem::path exe;
-    std::filesystem::path pdb;
-    std::filesystem::path json;
+    std::string exe_path;
+    std::string json_path;
+    std::string output_path;
 
     auto cli = lyra::cli();
     cli |= lyra::help(show_help);
-    cli |= lyra::arg(exe, "executable").required().help("The path to the original executable");
-    cli |= lyra::opt(json, "path")["-j"]["--json"].help("The json file emitted from ghidra");
-    cli |= lyra::opt(pdb, "path")["-o"]["--pdb"].help("The path to save the new .pdb");
+    cli |= lyra::arg(exe_path, "executable").required().help("The path to the original executable");
+    cli |= lyra::arg(json_path, "json").help("The json file emitted from ghidra");
+    cli |= lyra::opt(output_path, "path")["-o"]["--output"].help("The path to save the new .pdb");
 
     auto result = cli.parse({argc, argv});
     if (!result) {
@@ -889,31 +893,43 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    exe = std::filesystem::absolute(exe);
-    if (json.empty()) {
+    std::filesystem::path exe = std::filesystem::absolute(exe_path);
+
+    std::filesystem::path json = std::filesystem::absolute(json_path);
+    if (json_path.empty()) {
         json = std::filesystem::path(exe).concat(".json");
+    } else if (json_path == "-") {
+        // we will read from stdin
+        json.clear();
     }
 
+    std::filesystem::path pdb = std::filesystem::absolute(output_path);
     if (pdb.empty()) {
         pdb = std::filesystem::path(exe);
         pdb.replace_extension(".pdb");
     }
 
     std::cout << "exe: " << exe << std::endl;
-    std::cout << "json: " << json << std::endl;
+    if (json.empty()) {
+        std::cout << "json: <stdin>" << std::endl;
+    } else {
+        std::cout << "json: " << json << std::endl;
+    }
     std::cout << "pdb: " << pdb << std::endl;
 
     if (!std::filesystem::exists(exe)) {
         std::cerr << exe << " does not exist" << std::endl;
         return 2;
     }
-    if (!std::filesystem::exists(json)) {
+    
+    if (!json.empty() and !std::filesystem::exists(json)) {
         std::cerr << json << " does not exist" << std::endl;
         return 2;
     }
 
     try {
         return process(exe, json, pdb);
+        std::cout << "done!" << std::endl;
     } catch (nlohmann::json::exception e) {
         std::cout << "failed to parse json" << e.what() << std::endl;
         return -1;
