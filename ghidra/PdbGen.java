@@ -5,6 +5,11 @@
 //@menupath Tools.Generate PDB
 //@toolbar 
 
+import java.io.BufferedReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -13,12 +18,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import org.apache.logging.log4j.util.Strings;
+import org.apache.commons.io.FilenameUtils;
 
-import ghidra.app.plugin.core.navigation.FunctionUtils;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+
+import generic.util.Path;
 import ghidra.app.script.GhidraScript;
-import ghidra.program.database.data.DataTypeUtilities;
-import ghidra.program.database.function.FunctionDB;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.*;
 import ghidra.program.model.data.Enum;
@@ -26,10 +32,8 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.FunctionSignature;
 import ghidra.program.model.listing.Parameter;
-import ghidra.program.model.listing.VariableUtilities;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolType;
-import ghidra.program.util.FunctionUtility;
 import ghidra.util.UniversalID;
 
 public class PdbGen extends GhidraScript {
@@ -117,76 +121,117 @@ public class PdbGen extends GhidraScript {
 		return forwardDeclared.get(id);
 	}
 	
-	private String dump(Pointer x) {
+	private JsonObject dump(Pointer x) {
 		if (!isSerialized(x.getDataType())) return null;
-		String fmt = "{\"type\":\"LF_POINTER\", \"id\": \"%s\", \"referent_type\": \"%s\"}";
-		return String.format(fmt, GetId(x), GetId(x.getDataType()));
+		
+		JsonObject json = new JsonObject();
+		json.addProperty("id", GetId(x));
+		json.addProperty("type", "LF_POINTER");
+		json.addProperty("referent_type", GetId(x.getDataType()));
+		return json;
 	}
 
-	private String dump(Array x) {
+	private JsonObject dump(Array x) {
 		if (!isSerialized(x.getDataType())) return null;
-		String fmt = "{\"type\":\"LF_ARRAY\", \"id\": \"%s\", \"index_type\": \"0x0077\", \"element_type\": \"%s\", \"size\": %d}";
-		return String.format(fmt, GetId(x), GetId(x.getDataType()), x.getLength());
+
+		JsonObject json = new JsonObject();
+		json.addProperty("id", GetId(x));
+		json.addProperty("type", "LF_ARRAY");
+		// TODO currently this is set to QWORD, is this different for x86/x64?
+		json.addProperty("index_type", "0x0077");
+		json.addProperty("element_type", GetId(x.getDataType()));
+		json.addProperty("size", x.getLength());
+		return json;
 	}
 	
-	private String dump(Union x) {
-		List<String> members = new ArrayList<String>();
+	private JsonObject dump(Union x) {
+		JsonArray members = new JsonArray();
 		for (DataTypeComponent dt : x.getComponents()) {
 			if (!isSerialized(dt.getDataType())) return null;
-			String fmt = "{\"type\": \"LF_MEMBER\", \"name\": \"%s\", \"type_id\": \"%s\", \"offset\": %d, \"attributes\": []}";
-			members.add(String.format(fmt, dt.getFieldName(), GetId(dt.getDataType()), dt.getOffset()));
+			JsonObject json = new JsonObject();
+			json.addProperty("type", "LF_MEMBER");
+			// TODO currently this is set to QWORD, is this different for x86/x64?
+			json.addProperty("name", dt.getFieldName());
+			json.addProperty("type_id", GetId(dt.getDataType()));
+			json.addProperty("offset", dt.getOffset());
+			json.add("attributes", new JsonArray());
+			members.add(json);
 		}
 		
-		String fmt = "{\"type\": \"LF_UNION\", \"id\": \"%s\", \"name\": \"%s\", \"unique_name\":\"%s\", \"size\": %d, \"fields\": [%s], \"options\": []}";
-		return String.format(fmt, GetFwdId(x), x.getName(),  GetFwdId(x), x.getLength(), Strings.join(members, ','));
+		JsonObject json = new JsonObject();
+		json.addProperty("id", GetFwdId(x));
+		json.addProperty("type", "LF_UNION");
+		json.addProperty("name", x.getName());
+		json.addProperty("unique_name", GetFwdId(x));
+		json.addProperty("size", x.getLength());
+		json.add("fields", members);
+		json.add("options", new JsonArray());
+		return json;
 	}
 
-	private String dump(Enum x) {
-		List<String> values = new ArrayList<String>();
+	private JsonObject dump(Enum x) {
+		JsonArray fields = new JsonArray();
 		for (long value : x.getValues()) {
-			String fmt = "{\"name\": \"%s\", \"value\": %d}";
-			values.add(String.format(fmt,  x.getName(value), value));
+			JsonObject json = new JsonObject();
+			json.addProperty("name", x.getName(value));
+			json.addProperty("value", value);
+			fields.add(json);
 		}
-		String fmt = "{\"type\":\"LF_ENUM\", \"id\": \"%s\", \"size\": %d, \"underlying_type\": \"0x0074\", \"name\": \"%s\", \"unique_name\": \"%s\", \"options\": [], \"fields\": [%s]}";
-		return String.format(fmt, GetFwdId(x), x.getLength(), x.getName(),  GetFwdId(x), Strings.join(values, ','));
+		JsonObject json = new JsonObject();
+		json.addProperty("id", GetFwdId(x));
+		json.addProperty("type", "LF_ENUM");
+		json.addProperty("size", x.getLength());
+		json.addProperty("underlying_type", "0x0074");
+		json.addProperty("name", x.getName());
+		json.addProperty("unique_name", GetFwdId(x));
+		json.add("fields", fields);
+		json.add("options", new JsonArray());
+		return json;
 	}
 
-	private String dump(Structure x) {
-		List<String> fields = new ArrayList<String>();
+	private JsonObject dump(Structure x) {
+		JsonArray fields = new JsonArray();
 		for (DataTypeComponent dt : x.getComponents()) {
 			if (!isSerialized(dt.getDataType())) return null;
+			
+			JsonObject json = new JsonObject();
+			json.addProperty("type", "LF_MEMBER");
+			json.addProperty("name", dt.getFieldName());
+			json.addProperty("type_id", GetId(dt.getDataType()));
+			json.addProperty("offset", dt.getOffset());
+			json.add("attributes", new JsonArray());
 			if (dt.isBitFieldComponent()) {
 				// TODO implement this
 				// BitFieldDataType bfdt = (BitFieldDataType) dt.getDataType();
-				String fmt = "{\"type\": \"LF_MEMBER\", \"name\": \"%s\", \"type_id\": \"%s\", \"offset\": %d, \"attributes\": []}";
-				fields.add(String.format(fmt, dt.getFieldName(), GetId(dt.getDataType()), dt.getOffset()));
-			} else {
-				String fmt = "{\"type\": \"LF_MEMBER\", \"name\": \"%s\", \"type_id\": \"%s\", \"offset\": %d, \"attributes\": []}";
-				fields.add(String.format(fmt, dt.getFieldName(), GetId(dt.getDataType()), dt.getOffset()));
 			}
+			
+			fields.add(json);
 		}
 		
-		String fmt = "{\"type\":\"LF_STRUCTURE\", \"id\": \"%s\", \"name\":\"%s\", \"unique_name\":\"%s\", \"size\": %d, \"options\":[], \"fields\": [%s]}";
-		return String.format(fmt, GetFwdId(x), x.getName(), GetFwdId(x), x.getLength(), Strings.join(fields, ','));
+		JsonObject json = new JsonObject();
+		json.addProperty("id", GetFwdId(x));
+		json.addProperty("type", "LF_STRUCTURE");
+		json.addProperty("name", x.getName());
+		json.addProperty("size", x.getLength());
+		json.addProperty("unique_name", GetFwdId(x));
+		json.add("options", new JsonArray());
+		json.add("fields", fields);
+		return json;
 	}
-
-//	No longer required, we map typedefs to their underlying type before processing the rest of the types
-//	I have not found any codeview type for typedefs, so we map the types (AFAIK like the linker does).
-//	private static String dump(TypeDef x) {
-//		return String.format("<typedef id=\"%s\" name=\"%s\" type=\"%s\" />", GetId(x),  x.getName(), GetId(x.getDataType()));
-//		String fmt = "{\"type\": \"TYPEDEF\", \"id\": \"%s\", \"name\": \"%s\", \"target\": \"%s\"}";
-//		return String.format(fmt, GetId(x), x.getName(), GetId(x.getDataType()));
-//		fakeUIDs.put(x.getUniversalID().toString(), GetId(x.getDataType()));
-//		return "";
-//	}
 	
-	private String dump(BitFieldDataType x) {
+	private JsonObject dump(BitFieldDataType x) {
 		if (!isSerialized(x.getBaseDataType())) return null;
-		String fmt = "{\"type\": \"LF_BITFIELD\", \"id\": \"%s\", \"type_id\": \"%s\", \"bit_offset\": %d, \"bit_size\": %d}";
-		return String.format(fmt, GetId(x), GetId(x.getBaseDataType()), x.getBitOffset(), x.getBitSize());
+
+		JsonObject json = new JsonObject();
+		json.addProperty("id", GetId(x));
+		json.addProperty("type", "LF_BITFIELD");
+		json.addProperty("type_id", GetId(x.getBaseDataType()));
+		json.addProperty("bit_offset", x.getBitOffset());
+		json.addProperty("bit_size", x.getBitSize());
+		return json;
 	}
 
-	private List<String> dump(FunctionDefinition x) {
+	private List<JsonObject> dump(FunctionDefinition x) {
 //		// There should be a good way of determining class, but I haven't found it yet
 //		// So instead I'm just gonna check calling convention and lookup the type manually.
 //		if (x.getGenericCallingConvention() == GenericCallingConvention.thiscall) {
@@ -198,57 +243,73 @@ public class PdbGen extends GhidraScript {
 //		}
 //		printf("function [%s] %s %s", x.getName(), GetId(x), x.getClass().getName());
 		if (!isSerialized(x.getReturnType())) return null;
-		List<String> parameters = new ArrayList<String>();
+		JsonArray parameters = new JsonArray();
 		for (ParameterDefinition p : x.getArguments()) {
 			if (!isSerialized(p.getDataType())) return null;
-			parameters.add('"'+GetId(p.getDataType())+'"');
+			parameters.add(GetId(p.getDataType()));
 		}
-		List<String> entries = new ArrayList<String>();
-		// we need to emit a LF_PROCEDURE before the LF_FUNC_ID because PDB requires strict ordering.
-		String fmt = "{\"type\":\"LF_PROCEDURE\", \"id\": \"%s\", \"name\": \"%s\", \"return_type\": \"%s\", \"calling_convention\": \"%s\", \"options\": [], \"parameters\": [%s]}";
-		entries.add(String.format(fmt, GetId(x), x.getName(), GetId(x.getReturnType()), x.getGenericCallingConvention().toString(), Strings.join(parameters, ',')));
+		List<JsonObject> entries = new ArrayList<JsonObject>();
 
+		JsonObject json = new JsonObject();
+		json.addProperty("type", "LF_PROCEDURE");
+		json.addProperty("id", GetId(x));
+		json.addProperty("name", x.getName());
+		json.addProperty("return_type", GetId(x.getReturnType()));
+		json.addProperty("calling_convention", x.getGenericCallingConvention().toString());
+		json.add("options", new JsonArray());
+		json.add("parameters", parameters);
+		entries.add(json);
+		
+		json = new JsonObject();
 		// We are creating a new id here just so it flows through our pipeline correctly with the rest of the types.
-		String tmpId = UUID.randomUUID().toString();
-		fmt = "{\"type\": \"LF_FUNC_ID\", \"id\": \"%s\", \"name\": \"%s\", \"function_type\": \"%s\", \"parent_scope\":\"%s\"}";
-		entries.add(String.format(fmt, tmpId, x.getName(), GetId(x), "0x0000"));
+		json.addProperty("type", "LF_FUNC_ID");
+		json.addProperty("id", UUID.randomUUID().toString());
+		json.addProperty("name", x.getName());
+		json.addProperty("function_type", GetId(x));
+		json.addProperty("parent_scope", "0x0000"); // placeholder
+		entries.add(json);
 
-//		entrypoints.put()
 		return entries;
 	}
 
-	private List<String> toJson(DataType dt) {
+	private List<JsonObject> toJson(DataType dt) {
 		if (dt instanceof FunctionDefinition) {
 			return dump((FunctionDefinition) dt);
 		}
 		
-		List<String> entries = new ArrayList<String>();
-		String line = null;
+		List<JsonObject> entries = new ArrayList<JsonObject>();
+		JsonObject json = null;
 		if (dt instanceof Pointer) {
-			line = dump((Pointer) dt);
+			json = dump((Pointer) dt);
 		} else if (dt instanceof BitFieldDataType) {
-			line = dump((BitFieldDataType) dt);
+			json = dump((BitFieldDataType) dt);
 		} else if (dt instanceof Array) {
-			line = dump((Array) dt);
+			json = dump((Array) dt);
 		} else if (dt instanceof Union) {
-			line = dump((Union) dt);
+			json = dump((Union) dt);
 		} else if (dt instanceof Enum) {
-			line = dump((Enum) dt);
+			json = dump((Enum) dt);
 		} else if (dt instanceof Structure) {
 			line = dump((Structure) dt);
 		} else if (dt instanceof DefaultDataType) {
 			// this is "undefined" which is predefined by codeview, so we will skip it here.
 			return entries;
+			json = dump((Structure) dt);
+		} else if (dt instanceof TypeDef){
+			// Not required... we map typedefs to their underlying type before processing the rest of the types
+			// I have not found any CodeView type for typedefs, so we map the types (AFAIK like the linker does).
+			// implementing this *might* cleanup the output a little, but not sure if the juice is worth the squeeze
+			return null;
 		} else {
 			printf("[PDBGEN] Unknown Type: id=%s, name=%s, class=%s\n", GetId(dt), dt.getName(), dt.getClass().getName());
 			return entries;
 		}
 
-		if (line == null) {
+		if (json == null) {
 			return null;
 		}
 		
-		entries.add(line);
+		entries.add(json);
 		return entries;
 	}
 
@@ -315,10 +376,10 @@ public class PdbGen extends GhidraScript {
 	}
 	
 
-	public List<String> toJson(List<DataType> datatypes) {
+	public JsonArray toJson(List<DataType> datatypes) {
 		// Build forward declarations for everything, basically because I'm lazy.
 		// We should only need to add forward declarations for data types that have cyclic dependencies.
-		List<String> lines = buildForwardDeclarations(datatypes);
+		JsonArray json = buildForwardDeclarations(datatypes);
 
 		// A naive ordered serialization. We continually iterate through the list,
 		// serializing data types only once they have had all their dependencies serialized.
@@ -329,12 +390,14 @@ public class PdbGen extends GhidraScript {
 			Iterator<DataType> itr = datatypes.iterator();
 			while (itr.hasNext()) {
 				DataType dt = itr.next();
-				List<String> entries = toJson(dt);
+				List<JsonObject> entries = toJson(dt);
 				if (entries == null) {
 					continue; // waiting for dependencies to added first
 				}
 				itr.remove();
-				lines.addAll(entries);
+				for (JsonObject entry : entries) {
+					json.add(entry);	
+				}
 				setSerialized(dt);
 				changed = true;
 			}
@@ -349,40 +412,51 @@ public class PdbGen extends GhidraScript {
 		}
 
 		printf("[PDBGEN] missing: %d\n", datatypes.size());
-		return lines;
+		return json;
 	}
 	
-	public List<String> buildForwardDeclarations(List<DataType> datatypes) {
-		List<String> lines = new ArrayList<String>();
+	public JsonArray buildForwardDeclarations(List<DataType> datatypes) {
+		// some data that is common to all forward declarations
+		JsonArray fields = new JsonArray();
+		JsonArray options = new JsonArray();
+		options.add("forwardref");
+		
+		JsonArray objs = new JsonArray();
 		for (DataType dt : datatypes) {			
-
-			String extra = "";
-			if (dt instanceof Enum) {
-				extra = "\"type\": \"LF_ENUM\", \"underlying_type\": \"0x0000\"";
-			} else if (dt instanceof Union) {
-				extra = "\"type\": \"LF_UNION\"";
-			} else if (dt instanceof Structure) {
-				extra = "\"type\": \"LF_STRUCTURE\"";
-			} else {
-				continue; // we do not need to forward declare this type
-			}
+			JsonObject json = new JsonObject();
 
 			// the forward declared type and the actual type need different IDs
 			// to make things easy, we use the original id in the forward declaration
 			// so we do not need to rewrite the all the references.
 			// We create a new Id for the actual type, because nothing else references it.
-			String id = GetId(dt);
-			String alias = GetFwdId(dt);
+			json.addProperty("id", GetId(dt));
+			
+			if (dt instanceof Enum) {
+				json.addProperty("type", "LF_ENUM");
+				json.addProperty("underlying_type", "0x0000");
+			} else if (dt instanceof Union) {
+				json.addProperty("type", "LF_UNION");
+			} else if (dt instanceof Structure) {
+				json.addProperty("type", "LF_STRUCTURE");
+			} else {
+				continue; // we do not need to forward declare this type
+			}
+
 
 			// PDB resolves forward declarations by looking for other types with the same unique name,
 			// if it does not find one, it will match on name instead. 
 			// I'm not sure if this can cause inconsistency if unique_name is not used...
 			// To avoid issues, we use a uuid for the unique name to consistently match correctly.
-			String fmt = "{\"id\": \"%s\", %s, \"name\": \"%s\", \"unique_name\": \"%s\", \"size\": 0, \"options\": [\"forwardref\"], \"fields\":[]}";
-			lines.add(String.format(fmt, id, extra, dt.getName(), alias)); // id is also the name
+			json.addProperty("name", dt.getName());
+			json.addProperty("unique_name", GetFwdId(dt));
+			json.addProperty("size", 0);
+			json.add("options", options);
+			json.add("fields", fields);
+			
+			objs.add(json);
 			setSerialized(dt);
 		}
-		return lines;
+		return objs;
 	}
 
 	public List<DataType> getAllDataTypes() {
@@ -442,8 +516,8 @@ public class PdbGen extends GhidraScript {
 		return symbols;
 	}
 
-	public List<String> toJsonSymbols(List<Symbol> symbols) {
-		List<String> lines = new ArrayList<String>();
+	public JsonArray toJsonSymbols(List<Symbol> symbols) {
+		JsonArray objs = new JsonArray();
 		FunctionManager manager = currentProgram.getFunctionManager();
 		for (Symbol symbol : symbols) {
 			SymbolType stype = symbol.getSymbolType();
@@ -461,9 +535,18 @@ public class PdbGen extends GhidraScript {
 			if (stype == SymbolType.CLASS) {
 			} else if (stype == SymbolType.FUNCTION) {
 				Function function = manager.getFunctionAt(address);
-				if (function.isThunk() && !name.startsWith("thunk_")) name = "thunk_"+name;
-				String fmt = "{\"type\": \"S_PUB32\", \"name\": \"%s\", \"address\": %d, \"function\": true}";
-				lines.add(String.format(fmt, name, address.getUnsignedOffset()));
+				// we rename any thunks to easily distinguish them from the actual functions
+				if (function.isThunk() && !name.startsWith("thunk_")) {
+					name = "thunk_"+name;
+				}
+				
+				JsonObject json = new JsonObject();
+				json.addProperty("type", "S_PUB32");
+				json.addProperty("name", name);
+				json.addProperty("address", address.getUnsignedOffset());
+				json.addProperty("function", true);
+				objs.add(json);
+
 				if (function.isThunk()) continue;
 
 				// for what ever reason, the ID of the FunctionSignature is different from when we dumps the types,
@@ -479,19 +562,34 @@ public class PdbGen extends GhidraScript {
 				Address end = function.getBody().getMaxAddress();
 
 				// S_GPROC32
-				fmt = "{\"type\": \"S_GPROC32\", \"name\": \"%s\", \"address\": %d, \"code_size\": %d, \"end\": %d, \"function_type\": \"%s\", \"debug_start\": %d, \"debug_end\": %d, \"parent\": \"%s\", \"flags\": []}";
-				lines.add(String.format(fmt,  name, start.getUnsignedOffset(), end.subtract(start)+1, 0, id, 0, 0, "0x0000"));
-				lines.add("{\"type\": \"S_END\"}");
+				json = new JsonObject();
+				json.addProperty("type", "S_GPROC32");
+				json.addProperty("name", name);
+				json.addProperty("address", start.getUnsignedOffset());
+				json.addProperty("code_size", end.subtract(start)+1);
+				json.addProperty("end", 0);
+				json.addProperty("function_type", id);
+				json.addProperty("debug_start", 0);
+				json.addProperty("debug_end", 0);
+				json.addProperty("parent", "0x0000");
+				json.add("flags", new JsonArray());
+				objs.add(json);
+				
+				json = new JsonObject();
+				json.addProperty("type", "S_END");
+				objs.add(json);
 
 //				// S_PROCREF
 //				fmt = "{\"type\": \"S_PROCREF\", \"name\": \"%s\", \"address\": %d, \"code_size\": \"%d\", \"function_type\": \"%s\", \"debug_start\": %d, \"debug_end\": %d, \"parent\": \"%s\", \"flags\": []}";
 //				lines.add(String.format(fmt,  name, start.getUnsignedOffset(), end.subtract(start)+1, id, 0, 0, "0x0000"));
-			} else if (stype == SymbolType.GLOBAL) {
-				String fmt = "{\"type\": \"S_PUB32\", \"name\": \"%s\", \"address\": %d, \"function\": false}";
-				lines.add(String.format(fmt, name, address.getUnsignedOffset()));
-			} else if (stype == SymbolType.GLOBAL_VAR) {
-				String fmt = "{\"type\": \"S_PUB32\", \"name\": \"%s\", \"address\": %d, \"function\": false}";
-				lines.add(String.format(fmt, name, address.getUnsignedOffset()));
+			} else if (stype == SymbolType.GLOBAL || stype == SymbolType.GLOBAL_VAR) {
+				JsonObject json = new JsonObject();
+				json.addProperty("type", "S_PUB32");
+				json.addProperty("name", name);
+				json.addProperty("adderss", address.getUnsignedOffset());
+				json.addProperty("function", false);
+				objs.add(json);
+
 			} else if (stype == SymbolType.LABEL) {
 			} else if (stype == SymbolType.CLASS) {
 			} else if (stype == SymbolType.LIBRARY) {
@@ -502,7 +600,7 @@ public class PdbGen extends GhidraScript {
 				// unknown symbol type
 			}
 		}
-		return lines;
+		return objs;
 	}
 
 	public void initializeTypeDefs() {
@@ -596,27 +694,61 @@ public class PdbGen extends GhidraScript {
 		}
 	}
 	
+	public static List<String> readAll(InputStream in) throws IOException {
+		BufferedReader reader = new BufferedReader(new InputStreamReader(in));
+		List<String> lines = new ArrayList<String>();
+		while (reader.ready()) {
+			lines.add(reader.readLine());
+		}
+		return lines;
+	}
+	
 	public void run() throws Exception {
 		// setup typedefs so we can map to basic types
 		initializeTypeDefs();
 
+		JsonObject json = new JsonObject();
+		
 		// Now serialize all the data types (in dependency order)
-		List<String> datatypes = toJson(getAllDataTypes());
-		List<String> symbols = toJsonSymbols(getAllSymbols());
-		String fmt = "{\"types\": [%s], \"symbols\": [%s]}";
-		String json = String.format(fmt, Strings.join(datatypes, ','), Strings.join(symbols, ','));
-
-		// simple configurable path
-		// Ghidra will cache the default value here, and it will prefer its internal cached vesion over our default path :(.
-		String path = currentProgram.getExecutablePath() + ".json";
-		path = askString("location to save", "select a location to save the output json", path);
-		PrintWriter w = new PrintWriter(path);
-		w.write(json);
-		w.close();
+		json.add("types", toJson(getAllDataTypes()));
+		json.add("symbols", toJsonSymbols(getAllSymbols()));
 
 		typedefs.clear();
 		serialized.clear();
 		forwardDeclared.clear();
+
+		// Ghidra has unhelpfully set the path to \C:\\Something\ this gives as a normal c:\\Something
+		String exepath = Path.fromPathString(currentProgram.getExecutablePath()).toString();
+		printf("executable: %s\n", exepath);
+		String output = FilenameUtils.removeExtension(exepath).concat(".pdb");
+		String jsonpath = FilenameUtils.removeExtension(exepath).concat(".json");
+		
+		output = "c:\\temp\\vmrest.pdb";
+		jsonpath = "c:\\temp\\vmrest.json";
+		
+		FileWriter w = new FileWriter(jsonpath);
+		w.write(json.toString());
+		w.close();
+		
+		// simple configurable path
+		// Ghidra will cache the default value here, and it will prefer its internal cached version over our default path :(.
+//		output = askString("location to save", "select a location to save the output pdb", output);
+//		
+		ProcessBuilder pdbgen = new ProcessBuilder();
+		pdbgen.command("pdbgen.exe", exepath, "-", "--output", output);
+		
+		Process proc = pdbgen.start();
+		PrintWriter stdin = new PrintWriter(proc.getOutputStream());
+		stdin.write(json.toString());
+		stdin.close();
+		proc.waitFor();
+		for (String line : readAll(proc.getInputStream())) {
+			println(line);
+		}
+		
+		for (String line : readAll(proc.getErrorStream())) {
+			printerr(line);
+		}
 		
 		return;
 	}

@@ -12,18 +12,23 @@ jobs:
         with:
           path: llvm
           repository: llvm/llvm-project
-          ref: refs/heads/release/11.x
+          ref: refs/heads/release/12.x
 
       - uses: actions/cache@v2
         id: cache
         with:
           path: llvm/build
-          key: ${{ runner.os }}-llvm-11
+          key: ${{ runner.os }}-llvm-12
+
+      - name: Patch LLVM
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: cmd
+        run: git -C llvm apply ../llvm-debuginfo.patch
 
       - name: Initialize LLVM
         if: steps.cache.outputs.cache-hit != 'true'
         shell: cmd
-        run: cmake -B llvm/build -S llvm/llvm
+        run: cmake -B llvm/build -S llvm/llvm 
 
       - name:  Build LLVM
         shell: cmd

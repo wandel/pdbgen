@@ -549,7 +549,6 @@ llvm::codeview::CVSymbol from_json_regrel(const nlohmann::json &json) {
     return WriteOneSymbol(record);
 }
 
-
 llvm::codeview::CVSymbol from_json_register(const nlohmann::json &json) {
     llvm::codeview::RegisterSym record(llvm::codeview::SymbolRecordKind::RegisterSym);
     json.at("type_id").get_to(record.Index);
@@ -557,7 +556,6 @@ llvm::codeview::CVSymbol from_json_register(const nlohmann::json &json) {
     json.at("register").get_to(record.Register);
     return WriteOneSymbol(record);
 }
-
 
 // Copied wholesale from lld
 struct ScopeRecord {
@@ -588,11 +586,15 @@ static void scopeStackClose(llvm::SmallVectorImpl<SymbolScope> &stack, uint32_t 
 
 // main logic here
 int process(std::filesystem::path exe_path, std::filesystem::path json_path, std::filesystem::path pdb_path) {
-    std::ifstream json_file(json_path);
-    assert(json_file.is_open());
-
     nlohmann::json json;
-    json_file >> json;
+
+    if (json_path.empty()) {
+        std::cin >> json;
+    } else {
+        std::ifstream json_file(json_path);
+        assert(json_file.is_open());
+        json_file >> json;
+    }
 
     llvm::pdb::PDBFileBuilder builder(allocator);
 
@@ -740,29 +742,29 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
     //// language = c++ frontend = 19.27.29112.0,
     //// backend = 19.27.29112.0
     //// flags = security checks | hot patchable
-    //llvm::codeview::Compile3Sym compile(llvm::codeview::SymbolKind::S_COMPILE3);
+    // llvm::codeview::Compile3Sym compile(llvm::codeview::SymbolKind::S_COMPILE3);
 
     //// just copying VS2019 for alot of these values
-    //if (coff->is64()) {
-    //    compile.Machine = llvm::codeview::CPUType::X64;
-    //} else {
-    //    compile.Machine = llvm::codeview::CPUType::Pentium3;
-    //}
-    //compile.Version = "Microsoft (R) Optimizing Compiler";
-    //compile.setLanguage(llvm::codeview::SourceLanguage::Cpp);
+    // if (coff->is64()) {
+    //     compile.Machine = llvm::codeview::CPUType::X64;
+    // } else {
+    //     compile.Machine = llvm::codeview::CPUType::Pentium3;
+    // }
+    // compile.Version = "Microsoft (R) Optimizing Compiler";
+    // compile.setLanguage(llvm::codeview::SourceLanguage::Cpp);
 
     //// frontend = 19.27.29112.0, backend = 19.27.29112.0
-    //compile.VersionFrontendMajor = 19;
-    //compile.VersionFrontendMinor = 27;
-    //compile.VersionFrontendBuild = 29112;
-    //compile.VersionFrontendQFE = 0;
+    // compile.VersionFrontendMajor = 19;
+    // compile.VersionFrontendMinor = 27;
+    // compile.VersionFrontendBuild = 29112;
+    // compile.VersionFrontendQFE = 0;
 
-    //compile.VersionBackendMajor = 19;
-    //compile.VersionBackendMinor = 27;
-    //compile.VersionBackendBuild = 29112;
-    //compile.VersionBackendQFE = 0;
+    // compile.VersionBackendMajor = 19;
+    // compile.VersionBackendMinor = 27;
+    // compile.VersionBackendBuild = 29112;
+    // compile.VersionBackendQFE = 0;
 
-    //moduleDBI.addSymbol(WriteOneSymbol(compile));
+    // moduleDBI.addSymbol(WriteOneSymbol(compile));
 
     // alot of this code is from lld\COFF\PDB.cpp
     llvm::codeview::CVSymbol newSym;
@@ -799,7 +801,7 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
             moduleDBI.addSymbol(from_json_bprel(entry));
             break;
         case SymbolType::S_REGREL32:
-            //moduleDBI.addSymbol(from_json_regrel(entry));
+            // moduleDBI.addSymbol(from_json_regrel(entry));
             break;
         case SymbolType::S_REGISTER:
             moduleDBI.addSymbol(from_json_register(entry));
@@ -899,15 +901,15 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
 
 int main(int argc, char **argv) {
     bool show_help = false;
-    std::filesystem::path exe;
-    std::filesystem::path pdb;
-    std::filesystem::path json;
+    std::string exe_path;
+    std::string json_path;
+    std::string output_path;
 
     auto cli = lyra::cli();
     cli |= lyra::help(show_help);
-    cli |= lyra::arg(exe, "executable").required().help("The path to the original executable");
-    cli |= lyra::opt(json, "path")["-j"]["--json"].help("The json file emitted from ghidra");
-    cli |= lyra::opt(pdb, "path")["-o"]["--pdb"].help("The path to save the new .pdb");
+    cli |= lyra::arg(exe_path, "executable").required().help("The path to the original executable");
+    cli |= lyra::arg(json_path, "json").help("The json file emitted from ghidra");
+    cli |= lyra::opt(output_path, "path")["-o"]["--output"].help("The path to save the new .pdb");
 
     auto result = cli.parse({argc, argv});
     if (!result) {
@@ -921,25 +923,36 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    exe = std::filesystem::absolute(exe);
-    if (json.empty()) {
+    std::filesystem::path exe = std::filesystem::absolute(exe_path);
+
+    std::filesystem::path json = std::filesystem::absolute(json_path);
+    if (json_path.empty()) {
         json = std::filesystem::path(exe).concat(".json");
+    } else if (json_path == "-") {
+        // we will read from stdin
+        json.clear();
     }
 
+    std::filesystem::path pdb = std::filesystem::absolute(output_path);
     if (pdb.empty()) {
         pdb = std::filesystem::path(exe);
         pdb.replace_extension(".pdb");
     }
 
     std::cout << "exe: " << exe << std::endl;
-    std::cout << "json: " << json << std::endl;
+    if (json.empty()) {
+        std::cout << "json: <stdin>" << std::endl;
+    } else {
+        std::cout << "json: " << json << std::endl;
+    }
     std::cout << "pdb: " << pdb << std::endl;
 
     if (!std::filesystem::exists(exe)) {
         std::cerr << exe << " does not exist" << std::endl;
         return 2;
     }
-    if (!std::filesystem::exists(json)) {
+
+    if (!json.empty() and !std::filesystem::exists(json)) {
         std::cerr << json << " does not exist" << std::endl;
         return 2;
     }
@@ -948,6 +961,7 @@ int main(int argc, char **argv) {
 
     /*try {
         return process(exe, json, pdb);
+        std::cout << "done!" << std::endl;
     } catch (nlohmann::json::exception e) {
         std::cout << "failed to parse json" << e.what() << std::endl;
         return -1;
