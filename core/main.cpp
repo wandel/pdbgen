@@ -40,6 +40,10 @@ llvm::object::COFFObjectFile *coff = nullptr;
 
 std::map<std::string, llvm::codeview::TypeIndex> type_cache;
 
+template <typename R, class FuncTy> void parallelSort(R &&Range, FuncTy Fn) {
+    llvm::parallelSort(std::begin(Range), std::end(Range), Fn);
+}
+
 llvm::codeview::TypeIndex lookup(std::string key) {
     // for any key < 0x1000 we will treat it as a builtin codeview type
     if (key._Starts_with("0x")) {
@@ -116,7 +120,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(RecordType, {
                                              {LF_FUNC_ID, "LF_FUNC_ID"},
                                          });
 
-enum SymbolType { S_PUB32, S_GPROC32, S_PROCREF, S_BPREL32, S_REGREL32, S_FRAMEPROC, S_END };
+enum SymbolType { S_PUB32, S_GPROC32, S_PROCREF, S_BPREL32, S_REGREL32, S_FRAMEPROC, S_REGISTER, S_END };
 NLOHMANN_JSON_SERIALIZE_ENUM(SymbolType, {
                                              {S_PUB32, "S_PUB32"},
                                              {S_GPROC32, "S_GPROC32"},
@@ -124,6 +128,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(SymbolType, {
                                              {S_BPREL32, "S_BPREL32"},
                                              {S_REGREL32, "S_REGREL32"},
                                              {S_FRAMEPROC, "S_FRAMEPROC"},
+                                             {S_REGISTER, "S_REGISTER"},
                                              {S_END, "S_END"},
                                          });
 
@@ -470,6 +475,14 @@ template <> struct nlohmann::adl_serializer<llvm::codeview::RegisterId> {
 
         if (reg.compare("RSP") == 0) {
             id = llvm::codeview::RegisterId::RSP;
+        } else if (reg.compare("RCX") == 0) {
+            id = llvm::codeview::RegisterId::RCX;
+        } else if (reg.compare("RDX") == 0) {
+            id = llvm::codeview::RegisterId::RDX;
+        } else if (reg.compare("R8") == 0) {
+            id = llvm::codeview::RegisterId::R8;
+        } else if (reg.compare("R9") == 0) {
+            id = llvm::codeview::RegisterId::R9;
         } else {
             std::string msg = "invalid register: '" + reg + "'";
             llvm::llvm_unreachable_internal(msg.c_str(), __FILE__, __LINE__);
@@ -535,6 +548,16 @@ llvm::codeview::CVSymbol from_json_regrel(const nlohmann::json &json) {
     json.at("register").get_to(record.Register);
     return WriteOneSymbol(record);
 }
+
+
+llvm::codeview::CVSymbol from_json_register(const nlohmann::json &json) {
+    llvm::codeview::RegisterSym record(llvm::codeview::SymbolRecordKind::RegisterSym);
+    json.at("type_id").get_to(record.Index);
+    json.at("name").get_to(record.Name);
+    json.at("register").get_to(record.Register);
+    return WriteOneSymbol(record);
+}
+
 
 // Copied wholesale from lld
 struct ScopeRecord {
@@ -711,35 +734,35 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
     objname.Name = modName;
     moduleDBI.addSymbol(WriteOneSymbol(objname));
 
-    // 64 | S_COMPILE3[size = 60]
-    // machine = intel x86 - x64,
-    // Ver = Microsoft(R) Optimizing Compiler,
-    // language = c++ frontend = 19.27.29112.0,
-    // backend = 19.27.29112.0
-    // flags = security checks | hot patchable
-    llvm::codeview::Compile3Sym compile(llvm::codeview::SymbolKind::S_COMPILE3);
+    //// 64 | S_COMPILE3[size = 60]
+    //// machine = intel x86 - x64,
+    //// Ver = Microsoft(R) Optimizing Compiler,
+    //// language = c++ frontend = 19.27.29112.0,
+    //// backend = 19.27.29112.0
+    //// flags = security checks | hot patchable
+    //llvm::codeview::Compile3Sym compile(llvm::codeview::SymbolKind::S_COMPILE3);
 
-    // just copying VS2019 for alot of these values
-    if (coff->is64()) {
-        compile.Machine = llvm::codeview::CPUType::X64;
-    } else {
-        compile.Machine = llvm::codeview::CPUType::Pentium3;
-    }
-    compile.Version = "Microsoft (R) Optimizing Compiler";
-    compile.setLanguage(llvm::codeview::SourceLanguage::Cpp);
+    //// just copying VS2019 for alot of these values
+    //if (coff->is64()) {
+    //    compile.Machine = llvm::codeview::CPUType::X64;
+    //} else {
+    //    compile.Machine = llvm::codeview::CPUType::Pentium3;
+    //}
+    //compile.Version = "Microsoft (R) Optimizing Compiler";
+    //compile.setLanguage(llvm::codeview::SourceLanguage::Cpp);
 
-    // frontend = 19.27.29112.0, backend = 19.27.29112.0
-    compile.VersionFrontendMajor = 19;
-    compile.VersionFrontendMinor = 27;
-    compile.VersionFrontendBuild = 29112;
-    compile.VersionFrontendQFE = 0;
+    //// frontend = 19.27.29112.0, backend = 19.27.29112.0
+    //compile.VersionFrontendMajor = 19;
+    //compile.VersionFrontendMinor = 27;
+    //compile.VersionFrontendBuild = 29112;
+    //compile.VersionFrontendQFE = 0;
 
-    compile.VersionBackendMajor = 19;
-    compile.VersionBackendMinor = 27;
-    compile.VersionBackendBuild = 29112;
-    compile.VersionBackendQFE = 0;
+    //compile.VersionBackendMajor = 19;
+    //compile.VersionBackendMinor = 27;
+    //compile.VersionBackendBuild = 29112;
+    //compile.VersionBackendQFE = 0;
 
-    moduleDBI.addSymbol(WriteOneSymbol(compile));
+    //moduleDBI.addSymbol(WriteOneSymbol(compile));
 
     // alot of this code is from lld\COFF\PDB.cpp
     llvm::codeview::CVSymbol newSym;
@@ -776,7 +799,10 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
             moduleDBI.addSymbol(from_json_bprel(entry));
             break;
         case SymbolType::S_REGREL32:
-            moduleDBI.addSymbol(from_json_regrel(entry));
+            //moduleDBI.addSymbol(from_json_regrel(entry));
+            break;
+        case SymbolType::S_REGISTER:
+            moduleDBI.addSymbol(from_json_register(entry));
             break;
         case SymbolType::S_END:
             newSym = WriteOneSymbol(llvm::codeview::ScopeEndSym(llvm::codeview::SymbolRecordKind::ScopeEndSym));
@@ -839,6 +865,10 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
 
     // linkerDBI.addSymbol(WriteOneSymbol(ebs));
 
+    parallelSort(publics, [](const llvm::pdb::BulkPublic &L, const llvm::pdb::BulkPublic &R) {
+        return strcmp(L.Name, R.Name) < 0;
+    });
+
     std::cout << "publics: " << publics.size() << std::endl;
     if (publics.size() > 0) {
         gsi.addPublicSymbols(std::move(publics));
@@ -861,6 +891,8 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
 
     // finally save everything out
     builder.commit(pdb_path.string(), &builder.getInfoBuilder().getGuid());
+
+    std::cout << "finished!" << std::endl;
 
     return 0;
 }
@@ -912,7 +944,9 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    try {
+    return process(exe, json, pdb);
+
+    /*try {
         return process(exe, json, pdb);
     } catch (nlohmann::json::exception e) {
         std::cout << "failed to parse json" << e.what() << std::endl;
@@ -920,5 +954,5 @@ int main(int argc, char **argv) {
     } catch (std::exception e) {
         std::cout << "unknown error:" << e.what() << std::endl;
         return -2;
-    }
+    }*/
 }

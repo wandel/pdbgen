@@ -65,6 +65,10 @@ public class PdbGen extends GhidraScript {
 		// FML... this needs to be fixed at some point.
 		// this should be done as a typedef, but we can't get "/undefined" by path for some reason.
 		String name = dt.getName();
+		if (name.contains("-")) {
+			name = name.split("-")[0];
+		}
+		
 		if (name == "undefined") {
 			return "void";
 		}
@@ -232,8 +236,11 @@ public class PdbGen extends GhidraScript {
 			line = dump((Enum) dt);
 		} else if (dt instanceof Structure) {
 			line = dump((Structure) dt);
+		} else if (dt instanceof DefaultDataType) {
+			// this is "undefined" which is predefined by codeview, so we will skip it here.
+			return entries;
 		} else {
-			printf("Unknown Type: id=%s, name=%s, class=%s", GetId(dt), dt.getName(), dt.getClass().getName());
+			printf("[PDBGEN] Unknown Type: id=%s, name=%s, class=%s\n", GetId(dt), dt.getName(), dt.getClass().getName());
 			return entries;
 		}
 
@@ -247,7 +254,7 @@ public class PdbGen extends GhidraScript {
 
 	public void PrintMissing(DataType dt0, String msg, DataType dt1) {
 		if (isSerialized(dt1)) return;
-		printf("missing: %s %s %s\n", dt0.getName(), msg, GetId(dt1));
+		printf("[PDBGEN] missing: %s %s %s\n", dt0.getName(), msg, GetId(dt1));
 	}
 
 	public void PrintMissing(Pointer dt) {
@@ -302,7 +309,7 @@ public class PdbGen extends GhidraScript {
 		}else if (dt instanceof FunctionDefinition) {
 			PrintMissing((FunctionDefinition) dt);
 		} else {
-			printf("Unknown Type:", dt);
+			printf("[PDBGEN] Unknown Type:", dt);
 		}
 		return;
 	}
@@ -341,7 +348,7 @@ public class PdbGen extends GhidraScript {
 			PrintMissing(dt);
 		}
 
-		printf("missing: %d\n", datatypes.size());
+		printf("[PDBGEN] missing: %d\n", datatypes.size());
 		return lines;
 	}
 	
@@ -487,7 +494,6 @@ public class PdbGen extends GhidraScript {
 				lines.add(String.format(fmt, name, address.getUnsignedOffset()));
 			} else if (stype == SymbolType.LABEL) {
 			} else if (stype == SymbolType.CLASS) {
-				printf("class:"+symbol.getName());
 			} else if (stype == SymbolType.LIBRARY) {
 			} else if (stype == SymbolType.LOCAL_VAR) {
 			} else if (stype == SymbolType.NAMESPACE) {
@@ -524,6 +530,7 @@ public class PdbGen extends GhidraScript {
 		typedefs.put("qword", "0x0077");
 		typedefs.put("float", "0x0040");
 		typedefs.put("double", "0x0041");
+		typedefs.put("float10", "0x0042")
 		// pointer types
 		typedefs.put("void *", "0x0603");
 		typedefs.put("short *", "0x0611");
@@ -539,22 +546,28 @@ public class PdbGen extends GhidraScript {
 		typedefs.put("char16_t *", "0x067A");
 		typedefs.put("char32_t *", "0x067B");
 		// I haven't seen these yet
-		typedefs.put("float", "0x0640");
-		typedefs.put("double", "0x0641");
+		typedefs.put("float *", "0x0640");
+		typedefs.put("double *", "0x0641");
+		typedefs.put("float10 *", "0x0642");
 		
 		for (String id : typedefs.values()) {
 			serialized.add(id);
 		}
 
+		typedefs.put("undefined", "byte");
 		typedefs.put("undefined1", "byte");
 		typedefs.put("undefined2", "ushort");
 		typedefs.put("undefined4", "uint");
 		typedefs.put("undefined8", "ulonglong");
 		typedefs.put("ImageBaseOffset32", "uint");
+		typedefs.put('float8', 'double')
+		typedefs.put('float8 *', 'double *')
 		// these types have a valid UniversalID so we reference that instead
 		// faking some objects that are not defined for some reason....
 		typedefs.put("GUID", "void");
-		typedefs.put("string", "void");
+		typedefs.put("string", "char *");
+		typedefs.put("unicode", "wchar_t *"); // as far as I can tell, unicode is defined as 16bit codepoints
+		typedefs.put("unicode32", "char32_t *");
 		Map<String, String> names = new HashMap<String, String>();
 		names.put("/undefined", "void");
 		names.put("/__int64", "longlong"); 

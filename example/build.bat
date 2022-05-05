@@ -9,6 +9,10 @@ IF NOT DEFINED PDBGEN (
     SET PDBGEN="..\build\Debug\pdbgen.exe"
 )
 
+IF NOT DEFINED PDBUTIL (
+    SET PDBUTIL="..\..\llvm-project\build\debug\bin\llvm-pdbutil.exe"
+)
+
 DEL /S /Q build32 build64
 cmake -B build32 -S . -Thost=x86
 cmake -B build64 -S . -Thost=x64
@@ -21,6 +25,9 @@ DEL /S /Q ghidra
 MKDIR ghidra
 CALL :ANALYZE example32, build32\Debug\example.exe
 CALL :ANALYZE example64, build64\Debug\example.exe
+
+CALL :DUMP build32\Debug\example.pdb
+CALL :DUMP build64\Debug\example.pdb
 
 CALL :BACKUP build32\Debug\example.pdb
 CALL :BACKUP build64\Debug\example.pdb
@@ -39,7 +46,10 @@ EXIT /B %ERRORLEVEL%
 MOVE "%~1" "%~1.bck"
 EXIT /B %ERRORLEVEL%
 
-
 :GENERATE
 %PDBGEN% "%~1"
+EXIT /B %ERRORLEVEL%
+
+:DUMP
+@REM %PDBUTIL dump --all %~1 > %~1.dump.txt
 EXIT /B %ERRORLEVEL%
