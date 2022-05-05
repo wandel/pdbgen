@@ -290,11 +290,10 @@ public class PdbGen extends GhidraScript {
 		} else if (dt instanceof Enum) {
 			json = dump((Enum) dt);
 		} else if (dt instanceof Structure) {
-			line = dump((Structure) dt);
+			json = dump((Structure) dt);
 		} else if (dt instanceof DefaultDataType) {
 			// this is "undefined" which is predefined by codeview, so we will skip it here.
 			return entries;
-			json = dump((Structure) dt);
 		} else if (dt instanceof TypeDef){
 			// Not required... we map typedefs to their underlying type before processing the rest of the types
 			// I have not found any CodeView type for typedefs, so we map the types (AFAIK like the linker does).
@@ -628,7 +627,7 @@ public class PdbGen extends GhidraScript {
 		typedefs.put("qword", "0x0077");
 		typedefs.put("float", "0x0040");
 		typedefs.put("double", "0x0041");
-		typedefs.put("float10", "0x0042")
+		typedefs.put("float10", "0x0042");
 		// pointer types
 		typedefs.put("void *", "0x0603");
 		typedefs.put("short *", "0x0611");
@@ -658,8 +657,8 @@ public class PdbGen extends GhidraScript {
 		typedefs.put("undefined4", "uint");
 		typedefs.put("undefined8", "ulonglong");
 		typedefs.put("ImageBaseOffset32", "uint");
-		typedefs.put('float8', 'double')
-		typedefs.put('float8 *', 'double *')
+		typedefs.put("float8", "double");
+		typedefs.put("float8 *", "double *");
 		// these types have a valid UniversalID so we reference that instead
 		// faking some objects that are not defined for some reason....
 		typedefs.put("GUID", "void");
