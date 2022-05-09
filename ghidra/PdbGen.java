@@ -242,6 +242,8 @@ public class PdbGen extends GhidraScript {
 //			printf("%s::%s()\n", clz.getName(), x.getName());
 //		}
 //		printf("function [%s] %s %s", x.getName(), GetId(x), x.getClass().getName());
+
+		// we wait (return null) until we have dumped all the dependant types
 		if (!isSerialized(x.getReturnType())) return null;
 		JsonArray parameters = new JsonArray();
 		for (ParameterDefinition p : x.getArguments()) {
@@ -312,23 +314,18 @@ public class PdbGen extends GhidraScript {
 		return entries;
 	}
 
-	public void PrintMissing(DataType dt0, String msg, DataType dt1) {
-		if (isSerialized(dt1)) return;
-		printf("[PDBGEN] missing: %s %s %s\n", dt0.getName(), msg, GetId(dt1));
-	}
-
 	public void PrintMissing(Pointer dt) {
-		PrintMissing(dt, "datatype", dt.getDataType());
+		printf("[PDBGEN] missing basetype '%s' for pointer '%s'\n", dt.getDataType().getName(), dt.getName());
 	}
 
 
 	public void PrintMissing(Array dt) {
-		PrintMissing(dt, "datatype", dt.getDataType());
+		printf("[PDBGEN] missing basetype '%s' for array '%s'\n", dt.getDataType().getName(), dt.getName());
 	}
 
 	public void PrintMissing(Union dt) {
 		for (DataTypeComponent component : dt.getComponents()) {
-			PrintMissing(dt, component.getFieldName(), component.getDataType());
+			printf("[PDBGEN] missing type '%s' for '%s.%s' \n", component.getDataType().getName(), dt.getName(), component.getFieldName());
 		}
 	}
 
@@ -338,18 +335,27 @@ public class PdbGen extends GhidraScript {
 
 	public void PrintMissing(Structure dt) {
 		for (DataTypeComponent component : dt.getComponents()) {
-			PrintMissing(dt, component.getFieldName(), component.getDataType());
+			if (isSerialized(component.getDataType())) {
+				continue;
+			}
+			printf("[PDBGEN] missing type '%s' for '%s.%s' \n", component.getDataType().getName(), dt.getName(), component.getFieldName());
 		}
 	}
 
 	public void PrintMissing(BitFieldDataType dt) {
-		PrintMissing(dt, "base type", dt.getBaseDataType());
+		printf("[PDBGEN] missing base type '%s' for bitfield '%s'\n", dt.getBaseDataType().getName(), dt.getName());
 	}
 
 	public void PrintMissing(FunctionDefinition dt) {
-		PrintMissing(dt, "return type", dt.getReturnType());
+		if (!isSerialized(dt.getReturnType())) {
+			printf("[PDBGEN] missing return type '%s' for function '%s'\n", dt.getReturnType().getName(), dt.getName());
+		}
+
 		for (ParameterDefinition p : dt.getArguments()) {
-			PrintMissing(dt, p.getName(), p.getDataType());
+			if (isSerialized(p.getDataType())) {
+				continue;
+			}
+			printf("[PDBGEN] missing type '%s' for argument '%s' in function '%s'\n", p.getDataType().getName(), p.getName(), dt.getName());
 		}
 	}
 	
@@ -366,10 +372,10 @@ public class PdbGen extends GhidraScript {
 			PrintMissing((Enum) dt);
 		} else if (dt instanceof Structure) {
 			PrintMissing((Structure) dt);
-		}else if (dt instanceof FunctionDefinition) {
+		} else if (dt instanceof FunctionDefinition) {
 			PrintMissing((FunctionDefinition) dt);
 		} else {
-			printf("[PDBGEN] Unknown Type:", dt);
+			printf("[PDBGEN] Unknown Type: %s\n", dt);
 		}
 		return;
 	}
@@ -721,9 +727,6 @@ public class PdbGen extends GhidraScript {
 		printf("executable: %s\n", exepath);
 		String output = FilenameUtils.removeExtension(exepath).concat(".pdb");
 		String jsonpath = FilenameUtils.removeExtension(exepath).concat(".json");
-		
-		output = "c:\\temp\\vmrest.pdb";
-		jsonpath = "c:\\temp\\vmrest.json";
 		
 		FileWriter w = new FileWriter(jsonpath);
 		w.write(json.toString());
