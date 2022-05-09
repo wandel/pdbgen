@@ -25,6 +25,7 @@ import com.google.gson.JsonObject;
 
 import generic.util.Path;
 import ghidra.app.script.GhidraScript;
+import ghidra.app.util.datatype.microsoft.GuidDataType;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.*;
 import ghidra.program.model.data.Enum;
@@ -303,7 +304,6 @@ public class PdbGen extends GhidraScript {
 			return null;
 		} else {
 			printf("[PDBGEN] Unknown Type: id=%s, name=%s, class=%s\n", GetId(dt), dt.getName(), dt.getClass().getName());
-			return entries;
 		}
 
 		if (json == null) {
@@ -325,7 +325,10 @@ public class PdbGen extends GhidraScript {
 
 	public void PrintMissing(Union dt) {
 		for (DataTypeComponent component : dt.getComponents()) {
-			printf("[PDBGEN] missing type '%s' for '%s.%s' \n", component.getDataType().getName(), dt.getName(), component.getFieldName());
+			if (isSerialized(component.getDataType())) {
+				continue;
+			}
+			printf("[PDBGEN] missing type '%s' for union field '%s.%s' \n", component.getDataType().getName(), dt.getName(), component.getFieldName());
 		}
 	}
 
@@ -338,7 +341,7 @@ public class PdbGen extends GhidraScript {
 			if (isSerialized(component.getDataType())) {
 				continue;
 			}
-			printf("[PDBGEN] missing type '%s' for '%s.%s' \n", component.getDataType().getName(), dt.getName(), component.getFieldName());
+			printf("[PDBGEN] missing type '%s' for struct field '%s.%s' \n", GetId(component.getDataType()), dt.getName(), component.getFieldName());
 		}
 	}
 
@@ -502,9 +505,27 @@ public class PdbGen extends GhidraScript {
 		Iterator<DataType> itr = datatypes.iterator();
 		while (itr.hasNext()) {
 			DataType dt = itr.next();
-			if (dt instanceof BuiltInDataType) {
+			// if (isSerialized(dt)) {
+			// 	printf("skipping: %s (%s)\n", dt.getName(), GetId(dt));
+			// 	itr.remove();
+			// 	// we have hardcoded this type to codeview a "typeindex" (eg int -> 0x0074)
+			// 	continue;
+			// } else
+			if (dt instanceof PointerDataType) {
+				// technically a BuiltInDataType, however some thiscall "this" parameters are defined like this :(
+				continue;
+			} else if (dt instanceof BuiltInDataType) {
 				itr.remove();
+				if (isSerialized(dt)) {
+					// normal built in (int, bool, char*, etc)
+					continue;
+				}
+				printf("[PDBGEN] removed: %s (%s)\n", dt.getName(), dt.getClass().getName());
 			} else if (dt instanceof TypeDef) {
+				// any other typedefs that are not explictly defined by codeview
+				DataType basetype = ((TypeDef) dt).getBaseDataType();
+				typedefs.put(dt.getName(), basetype.getName());
+				printf("[PDBGEN] mapped: %s => %s\n", dt.getName(), basetype.getName());
 				itr.remove();
 			}
 		}
@@ -628,6 +649,7 @@ public class PdbGen extends GhidraScript {
 		typedefs.put("ulong", "0x0022");
 		typedefs.put("longlong", "0x0076");
 		typedefs.put("ulonglong", "0x0077");
+		typedefs.put("uint128_t", "0x0079");
 		typedefs.put("word", "0x0073");
 		typedefs.put("dword", "0x0075");
 		typedefs.put("qword", "0x0077");
@@ -653,6 +675,7 @@ public class PdbGen extends GhidraScript {
 		typedefs.put("double *", "0x0641");
 		typedefs.put("float10 *", "0x0642");
 		
+		// pre serialize the hardcoded mappings into codeview so they are available already
 		for (String id : typedefs.values()) {
 			serialized.add(id);
 		}
@@ -661,20 +684,31 @@ public class PdbGen extends GhidraScript {
 		typedefs.put("undefined1", "byte");
 		typedefs.put("undefined2", "ushort");
 		typedefs.put("undefined4", "uint");
+		typedefs.put("undefined6", "ulonglong");
 		typedefs.put("undefined8", "ulonglong");
-		typedefs.put("ImageBaseOffset32", "uint");
+		// typedefs.put("ImageBaseOffset32", "undefined4");
+		// typedefs.put("ImageBaseOffset64", "undefined8");
 		typedefs.put("float8", "double");
 		typedefs.put("float8 *", "double *");
 		// these types have a valid UniversalID so we reference that instead
 		// faking some objects that are not defined for some reason....
-		typedefs.put("GUID", "void");
 		typedefs.put("string", "char *");
 		typedefs.put("unicode", "wchar_t *"); // as far as I can tell, unicode is defined as 16bit codepoints
 		typedefs.put("unicode32", "char32_t *");
 		Map<String, String> names = new HashMap<String, String>();
-		names.put("/undefined", "void");
-		names.put("/__int64", "longlong"); 
-		names.put("/__uint64", "ulonglong");
+		names.put("/undefined", "undefined");
+		names.put("/__int64", "int64"); 
+		names.put("/__uint64", "uint64");
+
+		// typedefs.put("GUID", "uint128_t");
+		typedefs.put("ImageBaseOffset32", "uint");
+		typedefs.put("ImageBaseOffset64", "ulonglong");
+		
+		// Not sure why, but ghidra has some weird integer types that show up
+		typedefs.put("int3", "int");
+		typedefs.put("uint3", "uint");
+
+
 
 		for (String key : names.keySet()) {
 			DataType dt = currentProgram.getDataTypeManager().getDataType(key);
