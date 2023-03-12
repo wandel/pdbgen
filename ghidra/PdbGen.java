@@ -20,8 +20,12 @@ import java.util.UUID;
 
 import org.apache.commons.io.FilenameUtils;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import generic.util.Path;
 import ghidra.app.script.GhidraScript;
@@ -41,6 +45,8 @@ public class PdbGen extends GhidraScript {
 	// Note: we are manually serializing json here, this is just to avoid any
 	// dependencies.
 	// this means it will break if we have any fields that need escaping.
+	boolean prettyPrint = true; // output json using pretty print; this results in larger file sizes but may be
+								// easier to read
 	Map<String, String> typedefs = new HashMap<String, String>();
 	List<String> serialized = new ArrayList<String>();
 	Map<String, String> forwardDeclared = new HashMap<String, String>();
@@ -799,7 +805,14 @@ public class PdbGen extends GhidraScript {
 		String jsonpath = FilenameUtils.removeExtension(exepath).concat(".json");
 
 		FileWriter w = new FileWriter(jsonpath);
-		w.write(json.toString());
+		if (prettyPrint) {
+			Gson gson = new GsonBuilder().setPrettyPrinting().create();
+			JsonElement je = JsonParser.parseString​(json.toString());
+			String prettyJsonString = gson.toJson(je);
+			w.write(prettyJsonString);
+		} else {
+			w.write(json.toString());
+		}
 		w.close();
 
 		// simple configurable path
