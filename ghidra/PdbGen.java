@@ -16,7 +16,11 @@ import java.util.Iterator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
+
+import javax.management.monitor.Monitor;
 
 import org.apache.commons.io.FilenameUtils;
 
@@ -52,6 +56,37 @@ public class PdbGen extends GhidraScript {
 	Map<String, String> forwardDeclared = new HashMap<String, String>();
 
 	Map<Address, FunctionDefinition> entrypoints = new HashMap<Address, FunctionDefinition>();
+	Instant start = Instant.now();
+	Instant sectionStart = Instant.now();
+	Integer item = 0;
+	String lastStatus = "";
+
+	private String timeElapsed() {
+		return timeElapsed(start);
+	}
+
+	private String timeElapsed(Instant start) {
+		Duration duration = Duration.between(start, Instant.now());
+		long HH = duration.toHours();
+		long MM = duration.toMinutesPart();
+		long SS = duration.toSecondsPart();
+		return String.format("%02d:%02d:%02d", HH, MM, SS);
+	}
+
+	private void updateMonitor(String status) throws Exception {
+		String itemString = "";
+		if (!lastStatus.equals(status)) {
+			// we're in a new section
+			sectionStart = Instant.now();
+			lastStatus = status;
+		}
+		if (monitor.isIndeterminate())
+			itemString = item.toString();
+		monitor.setMessage(String.format("%s/%s: %s %s", timeElapsed(sectionStart), timeElapsed(), status, itemString));
+		monitor.checkCanceled();
+		monitor.incrementProgress(1);
+		item = item + 1;
+	}
 
 	private boolean isSerialized(DataType dt) {
 		String id = GetId(dt);
@@ -257,7 +292,8 @@ public class PdbGen extends GhidraScript {
 		// }
 		// printf("%s::%s()\n", clz.getName(), x.getName());
 		// }
-		// printf("function [%s] %s %s", x.getName(), GetId(x), x.getClass().getName());
+		// printf("function [%s] %s %s\n", x.getName(), GetId(x),
+		// x.getClass().getName());
 
 		// we wait (return null) until we have dumped all the dependant types
 		if (!isSerialized(x.getReturnType()))
@@ -407,7 +443,7 @@ public class PdbGen extends GhidraScript {
 		return;
 	}
 
-	public JsonArray toJson(List<DataType> datatypes) {
+	public JsonArray toJson(List<DataType> datatypes) throws Exception {
 		// Build forward declarations for everything, basically because I'm lazy.
 		// We should only need to add forward declarations for data types that have
 		// cyclic dependencies.
@@ -420,13 +456,16 @@ public class PdbGen extends GhidraScript {
 		// type.
 		// Any data types that are missing dependent types will be left in the input
 		// list.
+		monitor.initialize(datatypes.size());
 		while (!datatypes.isEmpty()) {
 			boolean changed = false;
 			Iterator<DataType> itr = datatypes.iterator();
 			while (itr.hasNext()) {
+				updateMonitor("Converting datatypes to json");
 				DataType dt = itr.next();
 				List<JsonObject> entries = toJson(dt);
 				if (entries == null) {
+					monitor.setMaximum(monitor.getMaximum() + 1); // increase counter since we need to come back
 					continue; // waiting for dependencies to added first
 				}
 				itr.remove();
@@ -441,8 +480,11 @@ public class PdbGen extends GhidraScript {
 				break; // we failed to remove any data types.
 			}
 		}
+		printf("[PDBGEN] datatype deferred serialization %d\n", monitor.getMaximum() - datatypes.size());
 
+		monitor.initialize(datatypes.size());
 		for (DataType dt : datatypes) {
+			updateMonitor("Checking for missing datatypes");
 			PrintMissing(dt);
 		}
 
@@ -495,16 +537,17 @@ public class PdbGen extends GhidraScript {
 		return objs;
 	}
 
-	public List<DataType> getAllDataTypes() {
+	public List<DataType> getAllDataTypes() throws Exception {
 		List<DataType> datatypes = new ArrayList<DataType>();
 		// this function, despite its name, does not return all datatypes :(
 		// we are going to have to go find the missing ones.
 		currentProgram.getDataTypeManager().getAllDataTypes(datatypes);
-
+		int total = datatypes.size();
 		// for some reason, Ghidra does not include BitField DataTypes in
 		// getAllDataTypes, so we manually add them here.
 		Iterator<Composite> composites = currentProgram.getDataTypeManager().getAllComposites();
 		while (composites.hasNext()) {
+			updateMonitor("Getting composites");
 			Composite composite = composites.next();
 			for (DataTypeComponent component : composite.getComponents()) {
 				if (!component.isBitFieldComponent())
@@ -515,7 +558,10 @@ public class PdbGen extends GhidraScript {
 
 		// functions are not apart of the data type manager apparently.
 		Iterator<Function> functions = currentProgram.getFunctionManager().getFunctionsNoStubs(true);
+		total = currentProgram.getFunctionManager().getFunctionCount();
+		monitor.initialize(total);
 		while (functions.hasNext()) {
+			updateMonitor("Getting functions");
 			Function function = functions.next();
 			if (function.isThunk())
 				continue;
@@ -535,7 +581,9 @@ public class PdbGen extends GhidraScript {
 
 		// remove data types that we do not need to serialize for the pdb
 		Iterator<DataType> itr = datatypes.iterator();
+		item = 0;
 		while (itr.hasNext()) {
+			updateMonitor("Checking datatypes");
 			DataType dt = itr.next();
 			// if (isSerialized(dt)) {
 			// printf("skipping: %s (%s)\n", dt.getName(), GetId(dt));
@@ -565,9 +613,11 @@ public class PdbGen extends GhidraScript {
 		return datatypes;
 	}
 
-	public List<Symbol> getAllSymbols() {
+	public List<Symbol> getAllSymbols() throws Exception {
 		List<Symbol> symbols = new ArrayList<Symbol>();
+		item = 0;
 		for (Symbol symbol : currentProgram.getSymbolTable().getAllSymbols(false)) {
+			updateMonitor("Getting Symbols ");
 			if (symbol.isExternal())
 				continue;
 			symbols.add(symbol);
@@ -575,10 +625,13 @@ public class PdbGen extends GhidraScript {
 		return symbols;
 	}
 
-	public JsonArray toJsonSymbols(List<Symbol> symbols) {
+	public JsonArray toJsonSymbols(List<Symbol> symbols) throws Exception {
 		JsonArray objs = new JsonArray();
 		FunctionManager manager = currentProgram.getFunctionManager();
+		monitor.initialize(symbols.size());
+		item = 0;
 		for (Symbol symbol : symbols) {
+			updateMonitor("Converting symbols to json");
 			SymbolType stype = symbol.getSymbolType();
 			// SourceType source = symbol.getSource();
 			Address address = symbol.getAddress();
@@ -788,7 +841,6 @@ public class PdbGen extends GhidraScript {
 		initializeTypeDefs();
 
 		JsonObject json = new JsonObject();
-
 		// Now serialize all the data types (in dependency order)
 		json.add("types", toJson(getAllDataTypes()));
 		json.add("symbols", toJsonSymbols(getAllSymbols()));
@@ -804,6 +856,7 @@ public class PdbGen extends GhidraScript {
 		String output = FilenameUtils.removeExtension(exepath).concat(".pdb");
 		String jsonpath = FilenameUtils.removeExtension(exepath).concat(".json");
 
+		updateMonitor("Saving " + jsonpath);
 		FileWriter w = new FileWriter(jsonpath);
 		if (prettyPrint) {
 			Gson gson = new GsonBuilder().setPrettyPrinting().create();
@@ -828,15 +881,21 @@ public class PdbGen extends GhidraScript {
 		PrintWriter stdin = new PrintWriter(proc.getOutputStream());
 		stdin.write(json.toString());
 		stdin.close();
-		proc.waitFor();
-		for (String line : readAll(proc.getInputStream())) {
-			println(line);
-		}
+		while (proc.isAlive()) {
+			updateMonitor("Running pdbgen.exe");
+			if (monitor.isCancelled()) {
+				updateMonitor("Stopping pdbgen.exe");
+				proc.destroy();
+			}
+			for (String line : readAll(proc.getInputStream())) {
+				println(line);
+			}
 
-		for (String line : readAll(proc.getErrorStream())) {
-			printerr(line);
+			for (String line : readAll(proc.getErrorStream())) {
+				printerr(line);
+			}
+			Thread.sleep(1000);
 		}
-
 		return;
 	}
 }
