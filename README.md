@@ -25,16 +25,17 @@ This project is still very much a WIP, but the basic components should be usable
 ```sh
 # You will require a c++17 compliant compiler
 
-# grab llvm source code and generate cmake build files
-git clone --config core.autocrlf=false https://github.com/llvm/llvm-project.git 
-cd llvm-project
-cmake -B build -S llvm -Thost=x64
-cmake --build build --target llvm-pdbutil # will take 10mins or so
-
 git clone https://github.com/wandel/pdbgen.git
 cd pdbgen
-cmake -B build -S core -DLLVM_DIR=../../llvm-project/build/lib/cmake/llvm -Thost=x64
-cmake --build build
+# grab llvm submodule source code and generate cmake build files
+git submodule init
+git submodule update
+# build llvm-pdbutil. This needs to be redone manually. Cmake could probably be used to make it a single build command but I couldnt' figure out how to just target llvm-pdbutil and llvm is huge otherwise
+cmake -B extern/llvm-project/build -S extern/llvm-project/llvm -Thost=x64
+cmake --build extern/llvm-project/build --target llvm-pdbutil --config RelWithDebInfo # will take 10mins or so
+# build pdbgen
+cmake -B build -S core -DLLVM_DIR:String=../extern/llvm-project/build/lib/cmake/llvm -Thost=x64
+cmake --build build --config RelWithDebInfo
 ```
 ## To Do
 - [ ] Clean this mess up
