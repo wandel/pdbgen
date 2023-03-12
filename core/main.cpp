@@ -297,19 +297,23 @@ template <> struct nlohmann::adl_serializer<llvm::codeview::ClassRecord> {
         for (auto field : json["fields"]) {
             RecordType type;
             field.at("type").get_to(type);
-            switch (type) {
-            case LF_MEMBER:
-                cb.writeMemberType(field.get<llvm::codeview::DataMemberRecord>());
-                break;
-            case LF_ONEMETHOD:
-                cb.writeMemberType(field.get<llvm::codeview::OneMethodRecord>());
-                break;
-            case LF_METHOD:
-                cb.writeMemberType(field.get<llvm::codeview::OverloadedMethodRecord>());
-                break;
-            default:
-                std::cout << "unknown member type:" << field << std::endl;
-                assert(false);
+            try {
+                switch (type) {
+                case LF_MEMBER:
+                    cb.writeMemberType(field.get<llvm::codeview::DataMemberRecord>());
+                    break;
+                case LF_ONEMETHOD:
+                    cb.writeMemberType(field.get<llvm::codeview::OneMethodRecord>());
+                    break;
+                case LF_METHOD:
+                    cb.writeMemberType(field.get<llvm::codeview::OverloadedMethodRecord>());
+                    break;
+                default:
+                    std::cout << "unknown member type:" << field << std::endl;
+                    assert(false);
+                }
+            } catch (std::exception e) {
+                std::cout << "exception " << e.what() << "\tprocessing type:" << type << "\tfield:" << field << std::endl;
             }
             record.MemberCount++;
         }
