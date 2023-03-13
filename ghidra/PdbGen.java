@@ -88,6 +88,39 @@ public class PdbGen extends GhidraScript {
 		item = item + 1;
 	}
 
+	private int getSize(DataType dt) {
+		int sum = 0;
+		if (dt instanceof FunctionDefinition) {
+			FunctionDefinition func = (FunctionDefinition) dt;
+			for (ParameterDefinition p : func.getArguments()) {
+				sum += getSize(p.getDataType());
+			}
+			return sum;
+		}
+		if (dt instanceof Array) {
+			return dt.getLength();
+		}
+		if (dt instanceof Union) {
+			Union union = (Union) dt;
+			for (DataTypeComponent c : union.getComponents()) {
+				sum += getSize(c.getDataType());
+			}
+			return sum;
+		}
+		if (dt instanceof Enum) {
+			Enum enum1 = (Enum) dt;
+			return enum1.getValues().length;
+		}
+		if (dt instanceof Structure) {
+			Structure struct = (Structure) dt;
+			for (DataTypeComponent c : struct.getComponents()) {
+				sum += getSize(c.getDataType());
+			}
+			return sum;
+		}
+		return 1;
+	}
+
 	private boolean isSerialized(DataType dt) {
 		String id = GetId(dt);
 		return isSerialized(id);
@@ -444,6 +477,8 @@ public class PdbGen extends GhidraScript {
 	}
 
 	public JsonArray toJson(List<DataType> datatypes) throws Exception {
+		// sort so less complex data types are processed first
+		datatypes.sort((a, b) -> Integer.compare(getSize(a), getSize(b)));
 		// Build forward declarations for everything, basically because I'm lazy.
 		// We should only need to add forward declarations for data types that have
 		// cyclic dependencies.
