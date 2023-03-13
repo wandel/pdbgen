@@ -13,6 +13,7 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,6 +61,7 @@ public class PdbGen extends GhidraScript {
 	Instant sectionStart = Instant.now();
 	Integer item = 0;
 	String lastStatus = "";
+	Map<String, Duration> sectionTimer = new LinkedHashMap<String, Duration>();
 
 	private String timeElapsed() {
 		return timeElapsed(start);
@@ -67,6 +69,10 @@ public class PdbGen extends GhidraScript {
 
 	private String timeElapsed(Instant start) {
 		Duration duration = Duration.between(start, Instant.now());
+		return toString(duration);
+	}
+
+	private String toString(Duration duration) {
 		long HH = duration.toHours();
 		long MM = duration.toMinutesPart();
 		long SS = duration.toSecondsPart();
@@ -77,6 +83,8 @@ public class PdbGen extends GhidraScript {
 		String itemString = "";
 		if (!lastStatus.equals(status)) {
 			// we're in a new section
+			if (!lastStatus.isEmpty())
+				sectionTimer.put(lastStatus, Duration.between(sectionStart, Instant.now()));
 			sectionStart = Instant.now();
 			lastStatus = status;
 		}
@@ -86,6 +94,19 @@ public class PdbGen extends GhidraScript {
 		monitor.checkCanceled();
 		monitor.incrementProgress(1);
 		item = item + 1;
+	}
+
+	private void printSectionTimers() throws Exception {
+		if (!lastStatus.isEmpty())
+			sectionTimer.put(lastStatus, Duration.between(sectionStart, Instant.now()));
+		Duration total = Duration.between(start, Instant.now());
+		String format = "%-40s%s (%,.2f%%)\n";
+		printf("[PDBGEN] Total Time by Section\n");
+		for (String s : sectionTimer.keySet()) {
+			printf(format, s, toString(sectionTimer.get(s)),
+					(float) sectionTimer.get(s).toSeconds() / total.toSeconds() * 100);
+		}
+		printf(format, "Total", toString(total), 100.f);
 	}
 
 	private int getSize(DataType dt) {
@@ -491,7 +512,8 @@ public class PdbGen extends GhidraScript {
 		// type.
 		// Any data types that are missing dependent types will be left in the input
 		// list.
-		monitor.initialize(datatypes.size());
+		long total = datatypes.size();
+		monitor.initialize(total);
 		while (!datatypes.isEmpty()) {
 			boolean changed = false;
 			Iterator<DataType> itr = datatypes.iterator();
@@ -515,7 +537,9 @@ public class PdbGen extends GhidraScript {
 				break; // we failed to remove any data types.
 			}
 		}
-		printf("[PDBGEN] datatype deferred serialization %d\n", monitor.getMaximum() - datatypes.size());
+		long deferred = monitor.getMaximum() - total;
+		printf("[PDBGEN] datatype deferred serialization %d/%d (%,.2f%%)\n", deferred, total,
+				(float) deferred / total * 100);
 
 		monitor.initialize(datatypes.size());
 		for (DataType dt : datatypes) {
@@ -891,7 +915,7 @@ public class PdbGen extends GhidraScript {
 		String output = FilenameUtils.removeExtension(exepath).concat(".pdb");
 		String jsonpath = FilenameUtils.removeExtension(exepath).concat(".json");
 
-		updateMonitor("Saving " + jsonpath);
+		updateMonitor("Saving files");
 		FileWriter w = new FileWriter(jsonpath);
 		if (prettyPrint) {
 			Gson gson = new GsonBuilder().setPrettyPrinting().create();
@@ -929,8 +953,9 @@ public class PdbGen extends GhidraScript {
 			for (String line : readAll(proc.getErrorStream())) {
 				printerr(line);
 			}
-			Thread.sleep(1000);
+			Thread.sleep(1);
 		}
+		printSectionTimers();
 		return;
 	}
 }
