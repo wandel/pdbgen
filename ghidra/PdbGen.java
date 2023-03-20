@@ -3,7 +3,7 @@
 //@category Windows
 //@keybinding ctrl G
 //@menupath Tools.Generate PDB
-//@toolbar 
+//@toolbar
 
 import java.io.BufferedReader;
 import java.io.FileWriter;
@@ -44,23 +44,23 @@ public class PdbGen extends GhidraScript {
 	Map<String, String> typedefs = new HashMap<String, String>();
 	List<String> serialized = new ArrayList<String>();
 	Map<String, String> forwardDeclared = new HashMap<String, String>();
-	
+
 	Map<Address, FunctionDefinition> entrypoints = new HashMap<Address, FunctionDefinition>();
-	
+
 	private boolean isSerialized(DataType dt) {
 		String id = GetId(dt);
 		return isSerialized(id);
 	}
-	
+
 	private boolean isSerialized(String id) {
 		return serialized.contains(id);
 	}
-	
+
 	private void setSerialized(DataType dt) {
 		String id = GetId(dt);
 		serialized.add(id);
 	}
-	
+
 	private String GetIdUnmapped(DataType dt) {
 		if (dt == null) {
 			// Not sure if this should be LF_NULLLEAF (0x0009)
@@ -91,11 +91,11 @@ public class PdbGen extends GhidraScript {
 		if (dt instanceof BitFieldDataType) {
 			name = String.format("%s:%d", name, ((BitFieldDataType) dt).getBitOffset());
 		}
-		
+
 		// some types don't have UniversalIDs, so we use the name instead
 		return name;
 	}
-	
+
 	private String GetId(DataType dt) {
 		String key = GetIdUnmapped(dt);
 
@@ -107,7 +107,7 @@ public class PdbGen extends GhidraScript {
 
 		return key;
 	}
-	
+
 	// Get the new ID for a type that has been forward declared.
 	private String GetFwdId(DataType dt) {
 		String id = GetId(dt);
@@ -117,10 +117,10 @@ public class PdbGen extends GhidraScript {
 		}
 		return forwardDeclared.get(id);
 	}
-	
+
 	private JsonObject dump(Pointer x) {
 		if (!isSerialized(x.getDataType())) return null;
-		
+
 		JsonObject json = new JsonObject();
 		json.addProperty("id", GetId(x));
 		json.addProperty("type", "LF_POINTER");
@@ -140,7 +140,7 @@ public class PdbGen extends GhidraScript {
 		json.addProperty("size", x.getLength());
 		return json;
 	}
-	
+
 	private JsonObject dump(Union x) {
 		JsonArray members = new JsonArray();
 		for (DataTypeComponent dt : x.getComponents()) {
@@ -154,7 +154,7 @@ public class PdbGen extends GhidraScript {
 			json.add("attributes", new JsonArray());
 			members.add(json);
 		}
-		
+
 		JsonObject json = new JsonObject();
 		json.addProperty("id", GetFwdId(x));
 		json.addProperty("type", "LF_UNION");
@@ -203,10 +203,10 @@ public class PdbGen extends GhidraScript {
 				// TODO implement this
 				// BitFieldDataType bfdt = (BitFieldDataType) dt.getDataType();
 			}
-			
+
 			fields.add(json);
 		}
-		
+
 		JsonObject json = new JsonObject();
 		json.addProperty("id", GetFwdId(x));
 		json.addProperty("type", "LF_STRUCTURE");
@@ -217,7 +217,7 @@ public class PdbGen extends GhidraScript {
 		json.add("fields", fields);
 		return json;
 	}
-	
+
 	private JsonObject dump(BitFieldDataType x) {
 		if (!isSerialized(x.getBaseDataType())) return null;
 
@@ -260,7 +260,7 @@ public class PdbGen extends GhidraScript {
 		json.add("options", new JsonArray());
 		json.add("parameters", parameters);
 		entries.add(json);
-		
+
 		json = new JsonObject();
 		// We are creating a new id here just so it flows through our pipeline correctly with the rest of the types.
 		json.addProperty("type", "LF_FUNC_ID");
@@ -283,7 +283,7 @@ public class PdbGen extends GhidraScript {
 //		json.addProperty("", null);
 		return json;
 	}
-	
+
 	private List<JsonObject> toJson(DataType dt) {
 		if (dt instanceof FunctionDefinition) {
 			return dump((FunctionDefinition) dt);
@@ -323,7 +323,7 @@ public class PdbGen extends GhidraScript {
 		if (json == null) {
 			return null;
 		}
-		
+
 		entries.add(json);
 		return entries;
 	}
@@ -333,7 +333,7 @@ public class PdbGen extends GhidraScript {
 			 if(dt instanceof PointerDataType) {
 				printMissing((Pointer) dt);
 			} else {
-				printf("missing: BuiltIn '%s' missing, size=%d\n", GetIdUnmapped(dt), dt.getLength());
+				printf("[PDBGEN] missing: BuiltIn '%s' missing, size=%d\n", GetIdUnmapped(dt), dt.getLength());
 			}
 		} else if (dt instanceof FunctionDefinition) {
 			printMissing((FunctionDefinition) dt);
@@ -354,70 +354,70 @@ public class PdbGen extends GhidraScript {
 		} else if (dt instanceof BitFieldDataType) {
 			printMissing((BitFieldDataType) dt);
 		} else {
-			printf("missing: Unknown data type id='%s', type=%s\n", GetIdUnmapped(dt), dt.getClass().getName());
+			printf("[PDBGEN] missing: Unknown data type id='%s', type=%s\n", GetIdUnmapped(dt), dt.getClass().getName());
 		}
 	}
-	
+
 	public void printMissing(FunctionDefinition dt) {
 		if (!isSerialized(dt.getReturnType())) {
-			printf("missing: FunctionDefinition '%s' missing return type '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(dt.getReturnType()));
+			printf("[PDBGEN] missing: FunctionDefinition '%s' missing return type '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(dt.getReturnType()));
 		}
-		
+
 		for (ParameterDefinition argument : dt.getArguments()) {
 			if (!isSerialized(argument.getDataType())) {
-				printf("missing: FunctionDefinition '%s' missing argument type '%s' for '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(argument.getDataType()), argument.getName());
+				printf("[PDBGEN] missing: FunctionDefinition '%s' missing argument type '%s' for '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(argument.getDataType()), argument.getName());
 			}
 		}
 	}
-	
+
 	public void printMissing(Pointer dt) {
 		if (!isSerialized(dt.getDataType())) {
-			printf("missing: Pointer '%s' missing base type '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(dt.getDataType()));
+			printf("[PDBGEN] missing: Pointer '%s' missing base type '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(dt.getDataType()));
 		}
 	}
-	
+
 	public void printMissing(Array dt) {
 		if (!isSerialized(dt.getDataType())) {
-			printf("missing: Array '%s' missing base type '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(dt.getDataType()));
+			printf("[PDBGEN] missing: Array '%s' missing base type '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(dt.getDataType()));
 		}
 	}
-	
+
 	public void printMissing(Structure dt) {
 		for (DataTypeComponent component : dt.getComponents()) {
 			if (!isSerialized(component.getDataType())) {
-				printf("missing: Structure '%s' missing component type '%s' for field '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(component.getDataType()), component.getFieldName());
+				printf("[PDBGEN] missing: Structure '%s' missing component type '%s' for field '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(component.getDataType()), component.getFieldName());
 			}
 		}
 	}
-	
+
 	public void printMissing(Union dt) {
 		for (DataTypeComponent component : dt.getComponents()) {
 			if (!isSerialized(component.getDataType())) {
-				printf("missing: Union '%s' missing component type '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(component.getDataType()));
+				printf("[PDBGEN] missing: Union '%s' missing component type '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(component.getDataType()));
 			}
 		}
 	}
-	
+
 	public void printMissing(Enum dt) {
-		printf("missing: Enum missing '%s'\n", GetIdUnmapped(dt));
+		printf("[PDBGEN] missing: Enum missing '%s'\n", GetIdUnmapped(dt));
 	}
-	
+
 	public void printMissing(DefaultDataType dt) {
-		printf("missing: DefaultDataType missing '%s'\n", GetIdUnmapped(dt));
+		printf("[PDBGEN] missing: DefaultDataType missing '%s'\n", GetIdUnmapped(dt));
 	}
-	
+
 	public void printMissing(TypeDef dt) {
 		if (!isSerialized(dt.getBaseDataType())) {
-			printf("missing: TypeDef '%s' missing base type '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(dt.getBaseDataType()));
+			printf("[PDBGEN] missing: TypeDef '%s' missing base type '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(dt.getBaseDataType()));
 		}
 	}
-	
+
 	public void printMissing(BitFieldDataType dt) {
 		if (!isSerialized(dt.getBaseDataType())) {
-			printf("missing: BitField '%s' missing base type '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(dt.getBaseDataType()));
+			printf("[PDBGEN] missing: BitField '%s' missing base type '%s'\n", GetIdUnmapped(dt), GetIdUnmapped(dt.getBaseDataType()));
 		}
 	}
-	
+
 
 	public JsonArray toJson(List<DataType> datatypes) {
 		// Build forward declarations for everything, basically because I'm lazy.
@@ -438,16 +438,16 @@ public class PdbGen extends GhidraScript {
 //					 printf("skipped: %s (%s)\n", dt.getName(), GetId(dt));
 					continue; // waiting for dependencies to added first
 				}
-				
+
 				printf("[PDBGEN] dumped: id=%s, original=%s\n", GetId(dt), GetIdUnmapped(dt));
 				itr.remove();
 				for (JsonObject entry : entries) {
-					json.add(entry);	
+					json.add(entry);
 				}
 				setSerialized(dt);
 				changed = true;
 			}
-			
+
 			if (!changed) {
 				break; // we failed to remove any data types.
 			}
@@ -460,15 +460,15 @@ public class PdbGen extends GhidraScript {
 		printf("[PDBGEN] missing: %d\n", datatypes.size());
 		return json;
 	}
-	
+
 	public JsonArray buildForwardDeclarations(List<DataType> datatypes) {
 		// some data that is common to all forward declarations
 		JsonArray fields = new JsonArray();
 		JsonArray options = new JsonArray();
 		options.add("forwardref");
-		
+
 		JsonArray objs = new JsonArray();
-		for (DataType dt : datatypes) {			
+		for (DataType dt : datatypes) {
 			JsonObject json = new JsonObject();
 
 			// the forward declared type and the actual type need different IDs
@@ -476,7 +476,7 @@ public class PdbGen extends GhidraScript {
 			// so we do not need to rewrite the all the references.
 			// We create a new Id for the actual type, because nothing else references it.
 			json.addProperty("id", GetId(dt));
-			
+
 			if (dt instanceof Enum) {
 				json.addProperty("type", "LF_ENUM");
 				json.addProperty("underlying_type", "0x0000");
@@ -490,7 +490,7 @@ public class PdbGen extends GhidraScript {
 
 
 			// PDB resolves forward declarations by looking for other types with the same unique name,
-			// if it does not find one, it will match on name instead. 
+			// if it does not find one, it will match on name instead.
 			// I'm not sure if this can cause inconsistency if unique_name is not used...
 			// To avoid issues, we use a uuid for the unique name to consistently match correctly.
 			json.addProperty("name", dt.getName());
@@ -498,7 +498,7 @@ public class PdbGen extends GhidraScript {
 			json.addProperty("size", 0);
 			json.add("options", options);
 			json.add("fields", fields);
-			
+
 			objs.add(json);
 			setSerialized(dt);
 		}
@@ -511,7 +511,7 @@ public class PdbGen extends GhidraScript {
 		// we are going to have to go find the missing ones.
 		currentProgram.getDataTypeManager().getAllDataTypes(datatypes);
 
-		// for some reason, Ghidra does not include BitField DataTypes in getAllDataTypes, so we manually add them here. 
+		// for some reason, Ghidra does not include BitField DataTypes in getAllDataTypes, so we manually add them here.
 		Iterator<Composite> composites = currentProgram.getDataTypeManager().getAllComposites();
 		while (composites.hasNext()) {
 			Composite composite = composites.next();
@@ -562,11 +562,11 @@ public class PdbGen extends GhidraScript {
 //				itr.remove();
 			}
 		}
-		
+
 		return datatypes;
 	}
 
-	
+
 	public List<Symbol> getAllSymbols() {
 		List<Symbol> symbols = new ArrayList<Symbol>();
 		for (Symbol symbol : currentProgram.getSymbolTable().getAllSymbols(false)) {
@@ -599,7 +599,7 @@ public class PdbGen extends GhidraScript {
 				if (function.isThunk() && !name.startsWith("thunk_")) {
 					name = "thunk_"+name;
 				}
-				
+
 				JsonObject json = new JsonObject();
 				json.addProperty("type", "S_PUB32");
 				json.addProperty("name", name);
@@ -634,7 +634,7 @@ public class PdbGen extends GhidraScript {
 				json.addProperty("parent", "0x0000");
 				json.add("flags", new JsonArray());
 				objs.add(json);
-				
+
 				json = new JsonObject();
 				json.addProperty("type", "S_END");
 				objs.add(json);
@@ -646,7 +646,7 @@ public class PdbGen extends GhidraScript {
 				JsonObject json = new JsonObject();
 				json.addProperty("type", "S_PUB32");
 				json.addProperty("name", name);
-				json.addProperty("adderss", address.getUnsignedOffset());
+				json.addProperty("address", address.getUnsignedOffset());
 				json.addProperty("function", false);
 				objs.add(json);
 
@@ -699,17 +699,26 @@ public class PdbGen extends GhidraScript {
 		aliases.put("BuiltInTypes:/float10", "0x0042");
 
 		aliases.put("BuiltInTypes:/string", "0x0670");
+		aliases.put("BuiltInTypes:/string-utf8", "0x0670");
 		aliases.put("BuiltInTypes:/unicode", "0x067A");
 		aliases.put("BuiltInTypes:/unicode32", "0x067B");
 		aliases.put("BuiltInTypes:/TerminatedCString", "0x0670");
 		aliases.put("BuiltInTypes:/ImageBaseOffset32", "0x0075");
 		aliases.put("BuiltInTypes:/ImageBaseOffset64", "0x0076");
 
+		aliases.put("BuiltInTypes:/uint3", "0x0075");
+		aliases.put("BuiltInTypes:/longdouble", "0x0042");
+
 		aliases.put("BuiltInTypes:/undefined1", "0x0069");
 		aliases.put("BuiltInTypes:/undefined2", "0x0021");
+		aliases.put("BuiltInTypes:/undefined3", "0x0022");
 		aliases.put("BuiltInTypes:/undefined4", "0x0022");
+		aliases.put("BuiltInTypes:/undefined5", "0x0077");
+		aliases.put("BuiltInTypes:/undefined6", "0x0077");
+		aliases.put("BuiltInTypes:/undefined7", "0x0077");
 		aliases.put("BuiltInTypes:/undefined8", "0x0077");
-		
+
+
 		aliases.put("BuiltInTypes:/GUID", "0x0079");
 		aliases.put("BuiltInTypes:/IMAGE_RICH_HEADER", "0x0069");
 		aliases.put("BuiltInTypes:/PEx64_UnwindInfo", "0x069");
@@ -719,21 +728,21 @@ public class PdbGen extends GhidraScript {
 			printf("alias: %s -> %s\n", key, value);
 			DataType dt = currentProgram.getDataTypeManager().getDataType(key);
 			String typeid = GetIdUnmapped(dt);
-			
+
 			typedefs.put(key, value);
 			typedefs.put(typeid, value);
 
 			serialized.add(key);
 			serialized.add(typeid);
 		}
-		
+
 		for (String value : aliases.values()) {
 			if (value.startsWith("0x")) {
 				serialized.add(value);
 			}
 		}
 	}
-	
+
 	public static List<String> readAll(InputStream in) throws IOException {
 		BufferedReader reader = new BufferedReader(new InputStreamReader(in));
 		List<String> lines = new ArrayList<String>();
@@ -742,21 +751,23 @@ public class PdbGen extends GhidraScript {
 		}
 		return lines;
 	}
-	
-	public void run() throws Exception {
-    	ConsoleService console = state.getTool().getService(ConsoleService.class);
-    	console.clearMessages();
 
-    	// clear types from the last run
+	public void run() throws Exception {
+		if (state.getTool() != null) {
+			ConsoleService console = state.getTool().getService(ConsoleService.class);
+			console.clearMessages();
+		}
+
+		// clear types from the last run
 		typedefs.clear();
 		serialized.clear();
 		forwardDeclared.clear();
-    	
+
 		// setup typedefs so we can map to basic types
 		initializeTypeDefs();
 
 		JsonObject json = new JsonObject();
-		
+
 		// Now serialize all the data types (in dependency order)
 		json.add("types", toJson(getAllDataTypes()));
 		json.add("symbols", toJsonSymbols(getAllSymbols()));
@@ -767,18 +778,18 @@ public class PdbGen extends GhidraScript {
 		printf("executable: %s\n", exepath);
 		String output = FilenameUtils.removeExtension(exepath).concat(".pdb");
 		String jsonpath = FilenameUtils.removeExtension(exepath).concat(".json");
-		
+
 		FileWriter w = new FileWriter(jsonpath);
 		w.write(json.toString());
 		w.close();
-		
+
 		// simple configurable path
 		// Ghidra will cache the default value here, and it will prefer its internal cached version over our default path :(.
 //		output = askString("location to save", "select a location to save the output pdb", output);
-		
+
 		ProcessBuilder pdbgen = new ProcessBuilder();
 		pdbgen.command("pdbgen.exe", exepath, "-", "--output", output);
-		
+
 		Process proc = pdbgen.start();
 		PrintWriter stdin = new PrintWriter(proc.getOutputStream());
 		stdin.write(json.toString());
@@ -787,11 +798,11 @@ public class PdbGen extends GhidraScript {
 		for (String line : readAll(proc.getInputStream())) {
 			println(line);
 		}
-		
+
 		for (String line : readAll(proc.getErrorStream())) {
 			printerr(line);
 		}
-		
+
 		return;
 	}
 }
