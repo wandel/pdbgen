@@ -22,7 +22,7 @@ jobs:
       - name: Patch LLVM
         if: steps.cache.outputs.cache-hit != 'true'
         shell: cmd
-        run: git -C llvm apply ../llvm-debuginfo.patch
+        run: git -C llvm apply llvm-debuginfo.patch
 
       - name: Initialize LLVM
         if: steps.cache.outputs.cache-hit != 'true'
