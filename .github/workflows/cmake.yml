@@ -8,17 +8,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-      - uses: actions/checkout@v2
         with:
           path: llvm
           repository: llvm/llvm-project
-          ref: refs/heads/release/12.x
+          ref: refs/tags/llvmorg-16.0.0
 
       - uses: actions/cache@v2
         id: cache
         with:
           path: llvm/build
-          key: ${{ runner.os }}-llvm-12
+          key: ${{ runner.os }}-llvm-16
 
       - name: Patch LLVM
         if: steps.cache.outputs.cache-hit != 'true'
