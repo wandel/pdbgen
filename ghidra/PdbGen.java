@@ -625,6 +625,14 @@ public class PdbGen extends GhidraScript {
 //				// I dont have a good way of looking up the FunctionDefinition id from here. will probably need a refactor.
 				Address start = function.getBody().getMinAddress();
 				Address end = function.getBody().getMaxAddress();
+				
+
+				if (!start.hasSameAddressSpace(end)) {
+					// TODO: Generate symbols in a sane way when there are multiple "address ranges" for a function.
+					// The above functions will return the start of the lowest range, and the end of the highest range
+					// which is absolutely not what we want, so we are gonna skip them for now.
+					continue;
+				}
 
 				// S_GPROC32
 				json = new JsonObject();
