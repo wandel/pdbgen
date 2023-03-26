@@ -1,4 +1,18 @@
 .vscode
 
 build
+.venv
 __pycache__
+
+# windbg ttd files
+*.out
+*.run
+*.idx
+
+# extra binaries that i cant distribute
+ttd
+dbghelp.dll
+
+projects
+binaries
+binaries-large

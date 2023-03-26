@@ -7,27 +7,41 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
+
+      - uses: actions/checkout@v3
         with:
           path: llvm
           repository: llvm/llvm-project
-          ref: refs/heads/release/11.x
+          ref: refs/tags/llvmorg-16.0.0
 
-      - uses: actions/cache@v2
+      - uses: actions/cache/restore@v3
         id: cache
         with:
           path: llvm/build
-          key: ${{ runner.os }}-llvm-11
+          key: ${{ runner.os }}-llvmorg-16.0.0
+
+      - name: Patch LLVM
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          dir
+          git -C llvm apply ../llvm-debuginfo.patch
 
       - name: Initialize LLVM
         if: steps.cache.outputs.cache-hit != 'true'
         shell: cmd
-        run: cmake -B llvm/build -S llvm/llvm
+        run: cmake -B llvm/build -S llvm/llvm 
 
       - name:  Build LLVM
+        if: steps.cache.outputs.cache-hit != 'true'
         shell: cmd
         run: cmake --build llvm/build --target llvm-pdbutil  --config Release
+
+      - uses: actions/cache/save@v3
+        with:
+          path: llvm/build
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
       - name: Build PDBGen
         shell: cmd

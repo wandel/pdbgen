@@ -24,18 +24,15 @@ This project is still very much a WIP, but the basic components should be usable
 ## How to Build
 ```sh
 # You will require a c++17 compliant compiler
-
-# grab llvm source code and generate cmake build files
-git clone --config core.autocrlf=false https://github.com/llvm/llvm-project.git 
-cd llvm-project
-cmake -B build -S llvm -Thost=x64
-cmake --build build --target llvm-pdbutil # will take 10mins or so
-
-git clone https://github.com/wandel/pdbgen.git
-cd pdbgen
-cmake -B build -S core -DLLVM_DIR=../../llvm-project/build/lib/cmake/llvm -Thost=x64
-cmake --build build
+git clone --config core.autocrlf=false --branch llvmorg-16.0.0 --single-branch https://github.com/llvm/llvm-project.git
+git clone https://github.com/wandel/pdbgen.git --branch develop
+git -C llvm-project apply ../pdbgen/llvm-debuginfo.patch  # fix a bug in GSIStreamBuilder
+cmake -B llvm-project/build -S llvm-project/llvm -Thost=x64
+cmake --build llvm-project/build --target llvm-pdbutil # will take 10mins or so
+cmake -B pdbgen/build -S pdbgen/core -DLLVM_DIR=../../llvm-project/build/lib/cmake/llvm -Thost=x64
+cmake --build pdbgen/build
 ```
+
 ## To Do
 - [ ] Clean this mess up
 - [ ] Add symbols for function arguments
