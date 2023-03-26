@@ -195,10 +195,15 @@ public class PdbGen extends GhidraScript {
 
 			JsonObject json = new JsonObject();
 			json.addProperty("type", "LF_MEMBER");
-			json.addProperty("name", dt.getFieldName());
 			json.addProperty("type_id", GetId(dt.getDataType()));
 			json.addProperty("offset", dt.getOffset());
 			json.add("attributes", new JsonArray());
+			if (dt.getFieldName() == null) {
+				json.addProperty("name", dt.getDefaultFieldName());
+			} else {
+				json.addProperty("name", dt.getFieldName());				
+			}
+
 			if (dt.isBitFieldComponent()) {
 				// TODO implement this
 				// BitFieldDataType bfdt = (BitFieldDataType) dt.getDataType();
