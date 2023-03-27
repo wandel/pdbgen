@@ -17,6 +17,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.io.FilenameUtils;
 import org.python.modules.time.Time;
@@ -819,7 +820,7 @@ public class PdbGen extends GhidraScript {
 //		output = askString("location to save", "select a location to save the output pdb", output);
 
 		monitor.setIndeterminate(true);
-		monitor.setCancelEnabled(false);
+		monitor.setCancelEnabled(true);
 
 		ProcessBuilder pdbgen = new ProcessBuilder();
 		pdbgen.command("pdbgen.exe", exepath, "-", "--output", output);
@@ -828,13 +829,22 @@ public class PdbGen extends GhidraScript {
 		PrintWriter stdin = new PrintWriter(proc.getOutputStream());
 		stdin.write(json.toString());
 		stdin.close();
-		proc.waitFor();
-		for (String line : readAll(proc.getInputStream())) {
-			println(line);
-		}
 
-		for (String line : readAll(proc.getErrorStream())) {
-			printerr(line);
+		while (proc.isAlive()) {
+			if (monitor.isCancelled()) {
+				monitor.setMessage("Stopping pdbgen.exe");
+				proc.destroy();
+			}
+
+			for (String line : readAll(proc.getInputStream())) {
+				println(line);
+			}
+	
+			for (String line : readAll(proc.getErrorStream())) {
+				printerr(line);
+			}
+
+			proc.waitFor(100, TimeUnit.MILLISECONDS);
 		}
 
 		return;
