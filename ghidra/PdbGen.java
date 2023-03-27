@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.apache.commons.io.FilenameUtils;
+import org.python.modules.time.Time;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -37,6 +38,7 @@ import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolType;
 import ghidra.util.UniversalID;
+import ghidra.util.exception.CancelledException;
 
 public class PdbGen extends GhidraScript {
 	// Note: we are manually serializing json here, this is just to avoid any dependencies.
@@ -424,7 +426,12 @@ public class PdbGen extends GhidraScript {
 	}
 
 
-	public JsonArray toJson(List<DataType> datatypes) {
+	public JsonArray toJson(List<DataType> datatypes) throws CancelledException {
+		monitor.setMessage("Extracting DataTypes");
+		monitor.initialize(datatypes.size());
+		monitor.setIndeterminate(false);
+		monitor.setShowProgressValue(true);
+		monitor.setCancelEnabled(true);
 		// Build forward declarations for everything, basically because I'm lazy.
 		// We should only need to add forward declarations for data types that have cyclic dependencies.
 		JsonArray json = buildForwardDeclarations(datatypes);
@@ -437,6 +444,8 @@ public class PdbGen extends GhidraScript {
 			boolean changed = false;
 			Iterator<DataType> itr = datatypes.iterator();
 			while (itr.hasNext()) {
+				monitor.checkCanceled();
+
 				DataType dt = itr.next();
 				List<JsonObject> entries = toJson(dt);
 				if (entries == null) {
@@ -451,6 +460,7 @@ public class PdbGen extends GhidraScript {
 				}
 				setSerialized(dt);
 				changed = true;
+				monitor.incrementProgress(1);
 			}
 
 			if (!changed) {
@@ -581,10 +591,18 @@ public class PdbGen extends GhidraScript {
 		return symbols;
 	}
 
-	public JsonArray toJsonSymbols(List<Symbol> symbols) {
+	public JsonArray toJsonSymbols(List<Symbol> symbols) throws CancelledException {
+		monitor.setMessage("Extracting Symbols");
+		monitor.initialize(symbols.size());
+		monitor.setShowProgressValue(true);
+		monitor.setIndeterminate(false);
+		monitor.setCancelEnabled(true);
+
 		JsonArray objs = new JsonArray();
 		FunctionManager manager = currentProgram.getFunctionManager();
 		for (Symbol symbol : symbols) {
+			monitor.checkCanceled();
+			monitor.incrementProgress(1);
 			SymbolType stype = symbol.getSymbolType();
 //			SourceType source = symbol.getSource();
 			Address address = symbol.getAddress();
@@ -625,7 +643,7 @@ public class PdbGen extends GhidraScript {
 //				// I dont have a good way of looking up the FunctionDefinition id from here. will probably need a refactor.
 				Address start = function.getBody().getMinAddress();
 				Address end = function.getBody().getMaxAddress();
-				
+
 
 				if (!start.hasSameAddressSpace(end)) {
 					// TODO: Generate symbols in a sane way when there are multiple "address ranges" for a function.
@@ -799,6 +817,9 @@ public class PdbGen extends GhidraScript {
 		// simple configurable path
 		// Ghidra will cache the default value here, and it will prefer its internal cached version over our default path :(.
 //		output = askString("location to save", "select a location to save the output pdb", output);
+
+		monitor.setIndeterminate(true);
+		monitor.setCancelEnabled(false);
 
 		ProcessBuilder pdbgen = new ProcessBuilder();
 		pdbgen.command("pdbgen.exe", exepath, "-", "--output", output);
