@@ -896,9 +896,8 @@ int process(std::filesystem::path exe_path, std::filesystem::path json_path, std
     ExitOnError(dbi.addDbgStream(llvm::pdb::DbgHeaderType::SectionHdr, sectionsTable));
 
     // finally save everything out
-    builder.commit(pdb_path.string(), &builder.getInfoBuilder().getGuid());
-
-    std::cout << "finished!" << std::endl;
+    ExitOnError(builder.commit(pdb_path.string(), &builder.getInfoBuilder().getGuid()));
+    
 
     return 0;
 }
@@ -931,7 +930,8 @@ int main(int argc, char **argv) {
 
     std::filesystem::path json = std::filesystem::absolute(json_path);
     if (json_path.empty()) {
-        json = std::filesystem::path(exe).concat(".json");
+        json = std::filesystem::path(exe);
+        json.replace_extension(".json");
     } else if (json_path == "-") {
         // we will read from stdin
         json.clear();
@@ -961,9 +961,9 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    return process(exe, json, pdb);
+    //return process(exe, json, pdb);
 
-    /*try {
+    try {
         return process(exe, json, pdb);
         std::cout << "done!" << std::endl;
     } catch (nlohmann::json::exception e) {
@@ -972,5 +972,5 @@ int main(int argc, char **argv) {
     } catch (std::exception e) {
         std::cout << "unknown error:" << e.what() << std::endl;
         return -2;
-    }*/
+    }
 }
