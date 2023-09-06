@@ -264,7 +264,7 @@ public class PdbGen extends GhidraScript {
 		json.addProperty("id", GetId(x));
 		json.addProperty("name", x.getName());
 		json.addProperty("return_type", GetId(x.getReturnType()));
-		json.addProperty("calling_convention", x.getGenericCallingConvention().toString());
+		json.addProperty("calling_convention", x.getCallingConvention().toString());
 		json.add("options", new JsonArray());
 		json.add("parameters", parameters);
 		entries.add(json);
