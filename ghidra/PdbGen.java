@@ -6,11 +6,13 @@
 //@toolbar
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.HashMap;
@@ -20,7 +22,6 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.io.FilenameUtils;
-import org.python.modules.time.Time;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -28,20 +29,37 @@ import com.google.gson.JsonObject;
 import generic.util.Path;
 import ghidra.app.script.GhidraScript;
 import ghidra.app.services.ConsoleService;
-import ghidra.app.util.datatype.microsoft.GuidDataType;
+import ghidra.app.util.bin.ByteProvider;
+import ghidra.app.util.bin.MemoryByteProvider;
+import ghidra.app.util.bin.format.pdb.PdbParserConstants;
+import ghidra.app.util.bin.format.pe.FileHeader;
+import ghidra.app.util.bin.format.pe.NTHeader;
+import ghidra.app.util.bin.format.pe.OptionalHeader;
+import ghidra.app.util.bin.format.pe.PortableExecutable;
+import ghidra.app.util.pdb.PdbProgramAttributes;
+import ghidra.framework.options.Options;
+import ghidra.framework.preferences.Preferences;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.*;
 import ghidra.program.model.data.Enum;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.FunctionSignature;
-import ghidra.program.model.listing.Parameter;
+import ghidra.program.model.listing.Program;
+import ghidra.program.model.mem.Memory;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolType;
-import ghidra.util.UniversalID;
 import ghidra.util.exception.CancelledException;
+import pdb.PdbPlugin;
+import pdb.symbolserver.SymbolFileInfo;
+import pdb.symbolserver.SymbolServerInstanceCreatorContext;
+import pdb.symbolserver.SymbolServerInstanceCreatorRegistry;
+import pdb.symbolserver.SymbolServerService;
+import pdb.symbolserver.SymbolStore;
 
 public class PdbGen extends GhidraScript {
+	public final static String PREFERENCE_SYMBOL_OUTPUT_PATH = "PDBGEN_SYMBOL_OUTPUT_PATH";
+	public final static String OVERRIDE_SYMBOL_OUTPUT_PATH = null;
 	// Note: we are manually serializing json here, this is just to avoid any dependencies.
 	// this means it will break if we have any fields that need escaping.
 	Map<String, String> typedefs = new HashMap<String, String>();
@@ -784,10 +802,92 @@ public class PdbGen extends GhidraScript {
 		return lines;
 	}
 
+	public String getDbgPath(String base) throws Exception {
+		String exePath = FilenameUtils.normalize(currentProgram.getExecutablePath());
+		String dbgName = FilenameUtils.getBaseName(exePath).concat(".dbg");
+
+		// Get PortableExecutable from the current program
+		Memory memory = currentProgram.getMemory();
+		ByteProvider provider = new MemoryByteProvider(memory, currentProgram.getImageBase());
+		PortableExecutable pe = new PortableExecutable(provider, PortableExecutable.SectionLayout.MEMORY);
+		
+		// Get NT Header (IMAGE_NT_HEADERS)
+		NTHeader ntHeader = pe.getNTHeader();
+		if (ntHeader == null) {
+			println("NT header not found.");
+		}
+
+		// Get the Optional Header (IMAGE_OPTIONAL_HEADER)
+		OptionalHeader optionalHeader = ntHeader.getOptionalHeader();
+		if (optionalHeader == null) {
+			println("Optional header not found.");
+		}
+
+		FileHeader fileHeader = ntHeader.getFileHeader();
+		
+		String timeDateStamp = Integer.toHexString(fileHeader.getTimeDateStamp());
+		String imageSize = Long.toHexString(optionalHeader.getSizeOfImage());
+
+		return Paths.get(base, dbgName, timeDateStamp+imageSize, dbgName).toString();
+	}
+	
+	public String getPdbPath(String base) {
+		SymbolFileInfo info = SymbolFileInfo.fromProgramInfo(currentProgram);
+		if (info == null) {
+			return null;
+		}
+
+		String filename = info.getName();
+		return Paths.get(base, filename, info.getUniqueDirName(), filename).toString();
+	}
+
+	public String getSymbolOutputPath() throws Exception {
+		if (OVERRIDE_SYMBOL_OUTPUT_PATH != null) {
+			return OVERRIDE_SYMBOL_OUTPUT_PATH;
+		}
+
+		// TODO use the LocalSymbolStore in an intelligent manner
+//		SymbolServerInstanceCreatorContext context = SymbolServerInstanceCreatorRegistry.getInstance().getContext(currentProgram);
+//		SymbolServerService service = PdbPlugin.getSymbolServerService(context);
+//		SymbolStore store = service.getSymbolStore();
+
+		// Get the Symbol Output Path were we will save all our future pdbs.
+		String symbolOutputPath = Preferences.getProperty(PREFERENCE_SYMBOL_OUTPUT_PATH);
+		if (symbolOutputPath == null) {
+			symbolOutputPath = askDirectory("Select Symbol Output Path", "Set Symbol Output Path").getAbsolutePath();
+			Preferences.setProperty(PREFERENCE_SYMBOL_OUTPUT_PATH, symbolOutputPath);
+		} else {
+			printf("Using saved symbol output directory '%s'\n", symbolOutputPath);
+			printf("modify '%s' in '%s' to change symbol output location\n", PREFERENCE_SYMBOL_OUTPUT_PATH, Preferences.getFilename());
+		}
+
+		return symbolOutputPath;
+	}
+	
 	public void run() throws Exception {
 		if (state.getTool() != null) {
 			ConsoleService console = state.getTool().getService(ConsoleService.class);
 			console.clearMessages();
+		}
+
+		String symbolOutputPath = getSymbolOutputPath();
+		File baseSymbolDir = new File(symbolOutputPath);
+		if (!baseSymbolDir.exists()) {
+			String msg = String.format("The symbol output directory \"%s\" does not exit", baseSymbolDir.getAbsolutePath());
+			if (askYesNo("create symbol output directory", msg+", would you like to create it?")) {
+				baseSymbolDir.mkdirs();
+			} else {
+				printerr(msg);
+				return;
+			}
+		}
+		printf("base symbol path: %s\n", symbolOutputPath);
+
+		String output = getPdbPath(symbolOutputPath);
+		if (output == null) {
+			// TODO generate .dbg file instead, or ask for a location to save to
+			popup("Unable to create a PDB!\n\nThe original binary is missing the required PDB signature/guid and age information.");
+			return;
 		}
 
 		// clear types from the last run
@@ -808,16 +908,21 @@ public class PdbGen extends GhidraScript {
 		// Ghidra has unhelpfully set the path to \C:\\Something\ this gives as a normal c:\\Something
 		String exepath = Path.fromPathString(currentProgram.getExecutablePath()).toString();
 		printf("executable: %s\n", exepath);
-		String output = FilenameUtils.removeExtension(exepath).concat(".pdb");
-		String jsonpath = FilenameUtils.removeExtension(exepath).concat(".json");
+		String jsonpath = FilenameUtils.removeExtension(output).concat(".json");
+
+		File pdbfile = new File(output);
+		if (pdbfile.exists()) {
+			if (!askYesNo("overwrite pdb", "are you sure you want to overwrite \""+pdbfile.getAbsolutePath()+"\"")) {
+				return;
+			}
+			pdbfile.delete();
+		} else {
+			pdbfile.getParentFile().mkdirs();
+		}
 
 		FileWriter w = new FileWriter(jsonpath);
 		w.write(json.toString());
 		w.close();
-
-		// simple configurable path
-		// Ghidra will cache the default value here, and it will prefer its internal cached version over our default path :(.
-//		output = askString("location to save", "select a location to save the output pdb", output);
 
 		monitor.setIndeterminate(true);
 		monitor.setCancelEnabled(true);
