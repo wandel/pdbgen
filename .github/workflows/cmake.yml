@@ -7,25 +7,24 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           path: llvm
           repository: llvm/llvm-project
-          ref: refs/tags/llvmorg-16.0.0
+          ref: refs/tags/llvmorg-19.1.2
 
-      - uses: actions/cache/restore@v3
+      - uses: actions/cache/restore@v4
         id: cache
         with:
           path: llvm/build
-          key: ${{ runner.os }}-llvmorg-16.0.0
+          key: ${{ runner.os }}-llvmorg-19.1.2
 
       - name: Patch LLVM
         if: steps.cache.outputs.cache-hit != 'true'
         shell: cmd
         run: |
-          dir
           git -C llvm apply ../llvm-debuginfo.patch
 
       - name: Initialize LLVM
@@ -38,7 +37,7 @@ jobs:
         shell: cmd
         run: cmake --build llvm/build --target llvm-pdbutil  --config Release
 
-      - uses: actions/cache/save@v3
+      - uses: actions/cache/save@v4
         with:
           path: llvm/build
           key: ${{ steps.cache.outputs.cache-primary-key }}

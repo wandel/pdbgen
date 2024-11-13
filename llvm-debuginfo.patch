@@ -1,8 +1,8 @@
 diff --git a/llvm/lib/DebugInfo/PDB/Native/GSIStreamBuilder.cpp b/llvm/lib/DebugInfo/PDB/Native/GSIStreamBuilder.cpp
-index 169d49f64eb5..afee9272603d 100644
+index c195754c0c67..0623485bb499 100644
 --- a/llvm/lib/DebugInfo/PDB/Native/GSIStreamBuilder.cpp
 +++ b/llvm/lib/DebugInfo/PDB/Native/GSIStreamBuilder.cpp
-@@ -164,7 +164,7 @@ static int gsiRecordCmp(StringRef S1, StringRef S2) {
+@@ -165,7 +165,7 @@ static int gsiRecordCmp(StringRef S1, StringRef S2) {
      return memcmp(S1.data(), S2.data(), LS);
  
    // Both strings are ascii, perform a case-insensitive comparison.
