@@ -35,7 +35,7 @@ jobs:
       - name: Build LLVM
         if: steps.cache.outputs.cache-hit != 'true'
         shell: cmd
-        run: cmake --build llvm/build --target llvm-pdbutil  --config Release
+        run: cmake --build llvm/build --target llvm-pdbutil  --config Release -j
 
       - uses: actions/cache/save@v4
         with:
